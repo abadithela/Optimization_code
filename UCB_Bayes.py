@@ -9,7 +9,7 @@ import pdb
 
 class UCBOptimizer:
 	def __init__(self, objective, bounds, B, R=1, delta=0.05, n_restarts = 0,
-		n_init_samples = 5, tolerance = 0.05):
+		n_init_samples = 5, tolerance = 0.05, length_scale = 1):
 		# Objective here encodes the objective function to be optimized
 		# Bounds indicates the bounds over which objective is to be optimized.
 		# This algorithm will assume that the bounding region is hyper-rectangular
@@ -45,7 +45,7 @@ class UCBOptimizer:
 		# solution process, though it will lead to large runtimes for GPR regression in later stages (as
 		# the number of samples explodes).
 
-		# tolerance prescribes the required tolerance within which we would like the optimal value 
+		# tolerance prescribes the required tolerance within which we would like the optimal value
 		# to lie
 
 		self.objective = objective
@@ -72,7 +72,7 @@ class UCBOptimizer:
 		# Initialize a starting set of samples and their y-values.  Initial sample size is set to 5
 
 		if init_flag == False:
-			self.X_sample = np.random.uniform(self.bounds[:,0], self.bounds[:,1], 
+			self.X_sample = np.random.uniform(self.bounds[:,0], self.bounds[:,1],
 				size=(self.n_init_samples,self.dimension))
 			self.Y_sample = np.zeros((self.n_init_samples,1))
 			for i in range(self.n_init_samples):
@@ -94,7 +94,7 @@ class UCBOptimizer:
 		# gpr is the Regressed Gaussian Process defining the current mean and standard deviation.
 
 		# Returning the UCB based on the choice of beta.
-		return self.mu(x) + self.beta*self.sigma(x)                           
+		return self.mu(x) + self.beta*self.sigma(x)
 
 	def propose_location(self, opt_restarts = 20):
 		# Propose the next location to sample (identify the sample point that maximizes the UCB)
@@ -107,13 +107,13 @@ class UCBOptimizer:
 		def min_obj(x):
 			return -self.UCB(x=x)
 
-		
+
 		# Iterate through opt_restarts IP methods to determine the maximizer of the UCB over the
 		# hyper-rectangle identified by bounds.
 		for x0 in np.random.uniform(self.bounds[:, 0], self.bounds[:, 1], size=(opt_restarts, self.dimension)):
 			res = minimize(min_obj, x0 = x0, bounds = self.bounds, method='L-BFGS-B')
 			if res.fun < min_value:
-				min_value = res.fun[0]
+				min_value = res.fun
 				min_x = res.x
 
 		# Output the minimizer (which is the maximizer of the UCB as we're minimizing -UCB)
@@ -134,13 +134,10 @@ class UCBOptimizer:
 			self.Kinv = Kinv
 			self.mu = lambda x: np.dot(np.dot(kernel(x.reshape(1,-1), self.X_sample).reshape(1,-1),
 				Kinv),self.Y_sample)[0,0]
-			self.sigma = lambda x: kernel(x.reshape(1,-1)) - np.dot(np.dot(kernel(x.reshape(1,-1),
-				self.X_sample).reshape(1,-1), Kinv),kernel(x.reshape(1,-1), self.X_sample).reshape(-1,1))[0,0]
-
+			self.sigma = lambda x: (kernel(x.reshape(1,-1)) - np.dot(np.dot(kernel(x.reshape(1,-1), self.X_sample).reshape(1,-1), Kinv),kernel(x.reshape(1,-1), self.X_sample).reshape(-1,1)))[0,0]
 
 			innersqrt = np.linalg.det((1+2/t)*np.identity(self.X_sample.shape[0]) + kernel(self.X_sample))
 			self.beta = self.B + self.R*math.sqrt(2*math.log(math.sqrt(innersqrt)/self.delta))
-
 			new_x, min_val = self.propose_location(opt_restarts = self.X_sample.shape[0]*2)
 
 			F = 2*self.beta*self.sigma(new_x)
@@ -159,6 +156,7 @@ class UCBOptimizer:
 			print('Finshed with iteration %d'%t)
 			print('UCB value at that point: %.5f'%self.UCB_val)
 			print('Current best value: {}'.format(self.cmax))
+			print('Sample that yielded best value: {}'.format(self.best_sample))
 			print('Current F value: %.5f'%F)
 			print('Required tolerance: %.5f'%self.tol)
 			print('')
@@ -167,15 +165,3 @@ class UCBOptimizer:
 		print('Assumed maximum value: %.3f'%(-min_val))
 		print('beta at termination: %.3f'%self.beta)
 		print('Final variance at termination: %.3f'%self.term_sigma)
-
-
-
-
-
-
-
-
-
-
-
-
