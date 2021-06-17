@@ -76,9 +76,9 @@ class UCBOptimizer:
 				size=(self.n_init_samples,self.dimension))
 			self.Y_sample = np.zeros((self.n_init_samples,1))
 			for i in range(self.n_init_samples):
-				self.Y_sample[i] = self.objective(self.X_sample[i,:].reshape(1,-1))
+				self.Y_sample[i,0] = self.objective(self.X_sample[i,:].reshape(1,-1))
 				if self.Y_sample[i] > self.cmax:
-					self.cmax = self.Y_sample[i]
+					self.cmax = self.Y_sample[i,0]
 					self.best_sample = self.X_sample[i,:].reshape(1,-1)
 		elif sample is not None:
 			self.X_sample = sample
