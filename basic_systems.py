@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import math
 import time
 import pdb
 import cvxpy as cp
@@ -42,6 +43,7 @@ class unicycle():
 		self.xhist = init_state
 		self.uhist = []
 		self.dt = dt
+		self.pi = math.pi
 
 	def controller(self):
 		pass
@@ -55,12 +57,17 @@ class unicycle():
 		a vector of two elements for the control input (the linear and angular velocity,
 		the angular velocity should be in radians)
 		'''
-		xdot = np.array([[
-			ctrl_input[0,0]*np.cos(self.x[2,0]),
-			ctrl_input[0,0]*np.sin(self.x[2,0]),
-			ctrl_input[1,0]
-			]]).transpose()
+		xdot = self.g() @ ctrl_input
 		return xdot
+
+	def reset_angle(self):
+		result = self.x[2,0] % (2*self.pi)
+		if result <= math.pi:
+			self.x[2,0] = result
+		else:
+			self.x[2,0] = result - 2*math.pi
+		pass
+
 
 	def simulate(self, steps = 20, spacing = 100):
 		self.interior_dt = self.dt/spacing
@@ -69,6 +76,7 @@ class unicycle():
 			self.uhist.append(ctrl_input)
 			for splices in range(spacing):
 				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
+			self.reset_angle()
 			self.xhist = np.hstack((self.xhist, self.x))
 
 class nonlinear():
@@ -126,6 +134,83 @@ def QP_CBF(state, udes, f, g, h, dhdx, alpha):
 	prob.solve()
 	return u.value
 
+class cart_pendulum():
+	def __init__(self, init_state = np.zeros((4,1)), dt = 0.01, params = [5,1,1,9.81]):
+		'''
+		This system assumes a one dimensional input, and a cart/pendulum on a plane
+		Furthermore, the parameter list indicates the parameters for the cart, with the
+		following setup:
+			a) M = params[0] = mass of the cart
+			b) m = params[1] = mass of the pendulum ball
+			c) l = params[2] = length of the pendulum arm
+			d) g = params[3] = gravity
+		Assumes the state vector has the following format: x = [x, dx, theta, dtheta]
+		'''
+		self.x = init_state
+		self.xhist = init_state
+		self.uhist = []
+		self.dt = dt
+		self.M = params[0]
+		self.m = params[1]
+		self.l = params[2]
+		self.g = params[3]
+		self.get_linear_A()
+		self.get_linear_B()
+
+	def controller(self):
+		pass
+
+	def f(self):
+		vec = np.zeros((4,1))
+		vec[0,0] = self.x[1,0]
+		vec[1,0] = (self.m*(-self.x[3,0]**2*self.l + self.g*math.cos(self.x[2,0]))*math.sin(self.x[2,0]))/(
+			self.M + self.m*math.sin(self.x[2,0])**2)
+		vec[2,0] = self.x[3,0]
+		vec[3,0] = (self.g*(self.m + self.M)*math.sin(self.x[2,0]) - 
+			self.x[3,0]**2*self.l*self.m*math.sin(self.x[2,0])*math.cos(self.x[2,0]))/(self.l*(self.M + self.m*math.sin(self.x[2,0])**2))
+		return vec
+
+	def g_dyn(self):
+		vec = np.zeros((4,1))
+		vec[0,0] = 0
+		vec[1,0] = 1/(self.M + self.m*math.sin(self.x[2,0])**2)
+		vec[2,0] = 0
+		vec[3,0] = math.cos(self.x[2,0])/(self.l*(self.M + self.m*math.sin(self.x[2,0])**2))
+		return vec
+
+	def dynamics(self, ctrl_input):
+		xdot = self.f() + self.g_dyn() @ ctrl_input
+		return xdot
+	
+	def get_linear_A(self):
+		self.A = np.array([
+			[0, 1, 0, 0],
+			[0,0,self.m*self.g/self.M,0],
+			[0,0,0,1],
+			[0,0,(self.M+self.m)*self.g/(self.M*self.l),0]
+			])
+		return self.A
+
+	def get_linear_B(self):
+		self.B = np.array([[
+			0, 1/self.M, 0, 1/(self.l*self.M)]]).transpose()
+		return self.B
+
+	def linearized_dynamics(self, ctrl_input):
+		xdot = self.A @ self.x + self.B @ ctrl_input
+		return xdot
+
+	def simulate(self, steps = 50, spacing = 100):
+		self.interior_dt = self.dt/spacing
+		for tsteps in range(steps):
+			ctrl_input = self.controller()
+			self.uhist.append(ctrl_input)
+			for splices in range(spacing):
+				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
+			self.xhist = np.hstack((self.xhist, self.x))
+		pass
+
+
 if __name__ == '__main__':
 	f = lambda x: np.identity(2) @ x
 	g = lambda x: np.array([[0,1]]).transpose()
@@ -133,3 +218,6 @@ if __name__ == '__main__':
 	dhdx = lambda x: np.zeros((2,1))
 	alpha = lambda x: 2*x
 	print(QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, h = cbf, dhdx = dhdx, alpha = alpha))
+
+
+

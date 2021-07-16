@@ -242,5 +242,5 @@ class UCBOptimizer:
 		print('Assumed maximum value: %.3f'%(-min_val))
 		print('beta at termination: %.3f'%self.beta)
 		print('Final variance at termination: %.3f'%self.term_sigma)
-		print('Total number of times samples taken that did not satisfy constraints: %d'%missed_constraints)
-		print('Indeces in X_sample where the offending samples were taken {}'.format(indeces))
+		if self.constraints is not None: print('Total number of times samples taken that did not satisfy constraints: %d'%missed_constraints)
+		if self.constraints is not None: print('Indeces in X_sample where the offending samples were taken {}'.format(indeces))
