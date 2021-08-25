@@ -117,7 +117,6 @@ class UCBOptimizer:
 		else:
 			error('The initialization flag was set to False and a prior sample set was not provided')
 
-
 	def UCB(self, x):
 		# Calculate the Upper Confidence Bound for a value, x, based on the data-set, (x_sample, y_sample).
 		# gpr is the Regressed Gaussian Process defining the current mean and standard deviation.
@@ -184,7 +183,6 @@ class UCBOptimizer:
 
 		distance = length_list[minindex]
 		return minindex,distance
-
 
 	def optimize(self):
 		# Initialize the nominal Matern Kernel (known to be universal for any parameters)

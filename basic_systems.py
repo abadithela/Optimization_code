@@ -211,6 +211,38 @@ class cart_pendulum():
 		pass
 
 
+class discrete_grid:
+	def __init__(self, graph_size = [5,5], init_state = [2,2]):
+		self.state = init_state
+		self.xhist = [init_state]
+		self.uhist = []
+		self.graph_size = graph_size
+
+	def controller(self):
+		pass
+
+	def update(self):
+		x = self.state[0]
+		y = self.state[1]
+		c_action = self.controller()
+		if c_action == 'up':
+			y = min((y+1, self.graph_size[1]-1))
+		elif c_action == 'down':
+			y = max((y-1, 0))
+		elif c_action == 'left':
+			x = max((x-1, 0))
+		elif c_action == 'right':
+			x = min((x+1, self.graph_size[0]-1))
+		self.state = [x,y]
+		self.xhist.append(self.state)
+		pass
+
+	def simulate(self, steps = 50):
+		for i in range(steps): self.update()
+		pass 
+
+
+
 if __name__ == '__main__':
 	f = lambda x: np.identity(2) @ x
 	g = lambda x: np.array([[0,1]]).transpose()
