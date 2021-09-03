@@ -135,7 +135,7 @@ def QP_CBF(state, udes, f, g, h, dhdx, alpha):
 	return u.value
 
 class cart_pendulum():
-	def __init__(self, init_state = np.zeros((4,1)), dt = 0.01, params = [5,1,1,9.81]):
+	def __init__(self, init_state = np.zeros((4,1)), dt = 0.01, params = [2,1,0.2,9.81]):
 		'''
 		This system assumes a one dimensional input, and a cart/pendulum on a plane
 		Furthermore, the parameter list indicates the parameters for the cart, with the
@@ -178,8 +178,14 @@ class cart_pendulum():
 		vec[3,0] = math.cos(self.x[2,0])/(self.l*(self.M + self.m*math.sin(self.x[2,0])**2))
 		return vec
 
-	def dynamics(self, ctrl_input):
-		xdot = self.f() + self.g_dyn() @ ctrl_input
+	def dynamics(self, ctrl_input, disturbance_bound = None):
+		if disturbance_bound is None:
+			xdot = self.f() + self.g_dyn() @ ctrl_input
+		else:
+			base_vec = np.vstack((np.zeros((2,1)),np.random.normal(size = (2,1))))
+			normfac = np.random.uniform()
+			d = base_vec/np.linalg.norm(base_vec)*(normfac)**(1/2)*disturbance_bound
+			xdot = self.f() + self.g_dyn() @ ctrl_input + disturbance
 		return xdot
 	
 	def get_linear_A(self):
@@ -200,14 +206,24 @@ class cart_pendulum():
 		xdot = self.A @ self.x + self.B @ ctrl_input
 		return xdot
 
-	def simulate(self, steps = 50, spacing = 100):
+	def simulate(self, steps = 50, spacing = 100, end_condition = None, disturbance_bound = None):
 		self.interior_dt = self.dt/spacing
-		for tsteps in range(steps):
-			ctrl_input = self.controller()
-			self.uhist.append(ctrl_input)
-			for splices in range(spacing):
-				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
-			self.xhist = np.hstack((self.xhist, self.x))
+		if end_condition is None:
+			for tsteps in range(steps):
+				ctrl_input = self.controller()
+				self.uhist.append(ctrl_input[0,0])
+				for splices in range(spacing):
+					self.x = self.x + self.dynamics(ctrl_input = ctrl_input, disturbance_bound = disturbance_bound)*self.interior_dt
+				self.xhist = np.hstack((self.xhist, self.x))
+		else:
+			cstep = 1
+			while end_condition(self.x) == False and cstep <= steps:
+				ctrl_input = self.controller()
+				self.uhist.append(ctrl_input[0,0])
+				for splices in range(spacing):
+					self.x = self.x + self.dynamics(ctrl_input = ctrl_input, disturbance_bound = disturbance_bound)*self.interior_dt
+				self.xhist = np.hstack((self.xhist, self.x))
+				cstep += 1
 		pass
 
 
