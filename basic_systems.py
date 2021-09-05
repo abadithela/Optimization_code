@@ -183,8 +183,7 @@ class cart_pendulum():
 			xdot = self.f() + self.g_dyn() @ ctrl_input
 		else:
 			base_vec = np.vstack((np.zeros((2,1)),np.random.normal(size = (2,1))))
-			normfac = np.random.uniform()
-			d = base_vec/np.linalg.norm(base_vec)*(normfac)**(1/2)*disturbance_bound
+			disturbance = base_vec/np.linalg.norm(base_vec)*disturbance_bound
 			xdot = self.f() + self.g_dyn() @ ctrl_input + disturbance
 		return xdot
 	
