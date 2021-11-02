@@ -37,7 +37,7 @@ class UCBOptimizer:
 		# n_restarts is the number of times the GPR hyperparameters will be re-initialized when
 		# fitting (larger n_restarts indicates longer time to convergence, default value = 0 implying
 		# that the hyperparameters will not be optimized.  In general, the hyperparameters needn't be
-		# optimized as the algorithm will use the universal Matern Kernel.)
+		# optimized as the algorithm will use the universal Matern Kernel or the squared exponential kernel)
 
 		# n_init_samples is the number of samples the algorithm will start off with, the default will be 5,
 		# and they will be randomly sampled from the feasible, hyper-rectangular space.  For problems
@@ -76,6 +76,7 @@ class UCBOptimizer:
 		self.max_val = []
 		self.term_sigma = 0
 		self.UCB_sample_pt = 0
+		self.UCB_val = -1e6
 		self.constraints = constraints
 
 	def check_constraints(self,x):
@@ -199,7 +200,7 @@ class UCBOptimizer:
 		pass
 
 	def optimize(self):
-		# Initialize the nominal Matern Kernel (known to be universal for any parameters)
+		# Initialize the Squared Exponential Kernel (known to be universal for any parameters)
 		kernel = RBF(1.0)
 		self.kernel = kernel
 		F = 100
@@ -210,14 +211,13 @@ class UCBOptimizer:
 		self.calc_musigma(kernel = self.kernel)
 		new_x, min_val = self.propose_location(opt_restarts = self.X_sample.shape[0]*2)
 		F = 2*self.beta*self.sigma(new_x)
+		self.UCB_sample_pt = new_x
+		self.UCB_val = -min_val
 
 		while F >= self.tol:
 
 			self.term_sigma = self.sigma(new_x)
 			new_y = self.objective(new_x)
-
-			self.UCB_sample_pt = new_x
-			self.UCB_val = -min_val
 
 			if not self.check_constraints(new_x):
 				missed_constraints += 1
@@ -232,8 +232,6 @@ class UCBOptimizer:
 
 			print('Finshed with iteration %d'%t)
 			print('UCB value at that point: %.5f'%self.UCB_val)
-			print('Current best value: {}'.format(self.cmax))
-			print('Sample that yielded best value: {}'.format(self.best_sample))
 			print('Current F value: %.5f'%F)
 			print('Required tolerance: %.5f'%self.tol)
 			print('')
@@ -241,11 +239,15 @@ class UCBOptimizer:
 			self.calc_musigma(kernel = self.kernel)
 			new_x, min_val = self.propose_location(opt_restarts = self.X_sample.shape[0]*2)
 			F = 2*self.beta*self.sigma(new_x)
+			self.UCB_sample_pt = new_x
+			self.UCB_val = -min_val
 			t+=1
 
-		print('Assumed maximum value: %.3f'%(-min_val))
-		print('beta at termination: %.3f'%self.beta)
-		print('Final variance at termination: %.3f'%self.term_sigma)
+		print('Assumed maximum value: %.5f'%(-min_val))
+		print('beta at termination: %.5f'%self.beta)
+		print('Final variance at termination: %.5f'%self.term_sigma)
+		print('Final F at termination: %.5f'%F)
+		print('')
 		if self.constraints is not None: print('Total number of times samples taken that did not satisfy constraints: %d'%missed_constraints)
 		if self.constraints is not None: print('Indeces in X_sample where the offending samples were taken {}'.format(indeces))
 
@@ -256,7 +258,7 @@ class UCBOptimizer:
 			self.lb = [None for i in range(100)]
 			for i in range(100):
 				xval = np.array([[self.xbase[i]]])
-				self.mean_values[i] = self.mean(np.array(xval))
+				self.mean_values[i] = self.mu(np.array(xval))
 				self.ub = self.mean_values[i] + self.beta*self.sigma(xval)
 				self.lb = self.mean_values[i] - self.beta*self.sigma(xval)
 		elif self.bounds.shape[0] == 2:
