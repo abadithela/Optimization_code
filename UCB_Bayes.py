@@ -5,11 +5,14 @@ from scipy.stats import norm
 from scipy.optimize import minimize
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel, Matern, RBF
+from multiprocessing import Pool
 import pdb
+import time
 
 class UCBOptimizer:
 	def __init__(self, objective, bounds, B, R=1, delta=0.05, n_restarts = 0,
-		n_init_samples = 5, tolerance = 0.05, length_scale = 1, constraints = None):
+		n_init_samples = 5, tolerance = 0.05, length_scale = 1, constraints = None,
+		avail_processors = 1):
 		# Objective here encodes the objective function to be optimized
 		# Bounds indicates the bounds over which objective is to be optimized.
 		# This algorithm will assume that the bounding region is hyper-rectangular
@@ -78,6 +81,8 @@ class UCBOptimizer:
 		self.UCB_sample_pt = 0
 		self.UCB_val = -1e6
 		self.constraints = constraints
+		self.length_scale = length_scale
+		self.avail_processors = avail_processors
 
 	def check_constraints(self,x):
 		if self.constraints == None:
@@ -185,30 +190,29 @@ class UCBOptimizer:
 		distance = length_list[minindex]
 		return minindex,distance
 
-	def calc_musigma(self,kernel = RBF(1.0)):
-		Kn = kernel(self.X_sample)
+	def calc_musigma(self):
+		Kn = self.kernel(self.X_sample)
 		t = self.X_sample.shape[0]
 		eta = 2/t
-		Kinv = np.linalg.inv(Kn+eta*np.identity(self.X_sample.shape[0]))
+		Kinv = np.linalg.inv(Kn+(1+eta)*np.identity(self.X_sample.shape[0]))
 		self.Kinv = Kinv
-		self.mu = lambda x: np.dot(np.dot(kernel(x.reshape(1,-1), self.X_sample).reshape(1,-1),
+		self.mu = lambda x: np.dot(np.dot(self.kernel(x.reshape(1,-1), self.X_sample).reshape(1,-1),
 			Kinv),self.Y_sample)[0,0]
-		self.sigma = lambda x: (kernel(x.reshape(1,-1)) - np.dot(np.dot(kernel(x.reshape(1,-1), self.X_sample).reshape(1,-1), Kinv),kernel(x.reshape(1,-1), self.X_sample).reshape(-1,1)))[0,0]
+		self.sigma = lambda x: (self.kernel(x.reshape(1,-1)) - np.dot(np.dot(self.kernel(x.reshape(1,-1), self.X_sample).reshape(1,-1), Kinv),self.kernel(x.reshape(1,-1), self.X_sample).reshape(-1,1)))[0,0]
 
-		innersqrt = np.linalg.det((1+2/t)*np.identity(self.X_sample.shape[0]) + kernel(self.X_sample))
+		innersqrt = np.linalg.det((1+eta)*np.identity(self.X_sample.shape[0]) + self.kernel(self.X_sample))
 		self.beta = self.B + self.R*math.sqrt(2*math.log(math.sqrt(innersqrt)/self.delta))
 		pass
 
 	def optimize(self):
 		# Initialize the Squared Exponential Kernel (known to be universal for any parameters)
-		kernel = RBF(1.0)
-		self.kernel = kernel
+		self.kernel = RBF(self.length_scale)
 		F = 100
 		t = 1
 		missed_constraints = 0
 		indeces = []
 
-		self.calc_musigma(kernel = self.kernel)
+		self.calc_musigma()
 		new_x, min_val = self.propose_location(opt_restarts = self.X_sample.shape[0]*2)
 		F = 2*self.beta*self.sigma(new_x)
 		self.UCB_sample_pt = new_x
@@ -216,8 +220,10 @@ class UCBOptimizer:
 
 		while F >= self.tol:
 
+			start = time.time()
 			self.term_sigma = self.sigma(new_x)
 			new_y = self.objective(new_x)
+			print('Evaluating new objective function and calculating terminating sigma: %.4f'%(time.time() - start))
 
 			if not self.check_constraints(new_x):
 				missed_constraints += 1
@@ -236,8 +242,12 @@ class UCBOptimizer:
 			print('Required tolerance: %.5f'%self.tol)
 			print('')
 
-			self.calc_musigma(kernel = self.kernel)
+			start = time.time()
+			self.calc_musigma()
+			print('Calculating new mu/sigma: %.4f'%(time.time() - start))
+			start = time.time()
 			new_x, min_val = self.propose_location(opt_restarts = self.X_sample.shape[0]*2)
+			print('Finding new location: %.4f'%(time.time() - start))
 			F = 2*self.beta*self.sigma(new_x)
 			self.UCB_sample_pt = new_x
 			self.UCB_val = -min_val
