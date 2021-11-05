@@ -6,13 +6,25 @@ from scipy.optimize import minimize
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel, Matern, RBF
 from multiprocessing import Pool
+import matplotlib
+import matplotlib.pyplot as plt
+from matplotlib import colors as mcolors
+from matplotlib import rc, font_manager, cm
 import pdb
+import pickle
 import time
+
+matplotlib.rcParams['text.latex.preamble'] = [r'\usepackage{amsmath,amssymb}']
+rc('font',**{'family':'sans-serif','sans-serif':['Helvetica']})
+rc('text', usetex=True)
+colors = dict(mcolors.BASE_COLORS, **mcolors.CSS4_COLORS)
+plt.rcParams.update({'font.size':24})
+plt.rcParams["figure.figsize"] = (12.8,8)
 
 class UCBOptimizer:
 	def __init__(self, objective, bounds, B, R=1, delta=0.05, n_restarts = 0,
 		n_init_samples = 5, tolerance = 0.05, length_scale = 1, constraints = None,
-		avail_processors = 1):
+		avail_processors = 1, debug = False):
 		# Objective here encodes the objective function to be optimized
 		# Bounds indicates the bounds over which objective is to be optimized.
 		# This algorithm will assume that the bounding region is hyper-rectangular
@@ -83,6 +95,8 @@ class UCBOptimizer:
 		self.constraints = constraints
 		self.length_scale = length_scale
 		self.avail_processors = avail_processors
+		self.debug = debug
+		self.xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], 500).tolist()
 
 	def check_constraints(self,x):
 		if self.constraints == None:
@@ -131,10 +145,9 @@ class UCBOptimizer:
 		if self.check_constraints(x.reshape(1,-1)):
 			return self.mu(x) + self.beta*self.sigma(x)
 		else:
-
 			return -100
 
-	def propose_location(self, opt_restarts = 20):
+	def propose_location(self, opt_restarts = 20, granularity = 50):
 		# Propose the next location to sample (identify the sample point that maximizes the UCB)
 		# This is a nonlinear optimization problem and will require a number of restarts
 		# The number of restarts will be set to min(N_samples+1,25) to expedite computation
@@ -145,29 +158,50 @@ class UCBOptimizer:
 		def min_obj(x):
 			return -self.UCB(x=x)
 
+		if self.bounds.shape[0] > 1:
 
-		# Iterate through opt_restarts IP methods to determine the maximizer of the UCB over the
-		# hyper-rectangle identified by bounds.
-		if self.constraints is not None:
-			x0_array = np.array([])
-			init_state_count = 0
-			while init_state_count <= opt_restarts:
-				sample = np.random.uniform(self.bounds[:,0], self.bounds[:,1], size = (1,self.dimension))
-				if self.check_constraints(sample):
-					x0_array = np.vstack((x0_array,sample)) if x0_array.shape[0]>0 else sample
-					init_state_count += 1
+
+			# Iterate through opt_restarts IP methods to determine the maximizer of the UCB over the
+			# hyper-rectangle identified by bounds.
+			if self.constraints is not None:
+				x0_array = np.array([])
+				init_state_count = 0
+				while init_state_count <= opt_restarts:
+					sample = np.random.uniform(self.bounds[:,0], self.bounds[:,1], size = (1,self.dimension))
+					if self.check_constraints(sample):
+						x0_array = np.vstack((x0_array,sample)) if x0_array.shape[0]>0 else sample
+						init_state_count += 1
+			else:
+				x0_array = np.random.uniform(self.bounds[:, 0], self.bounds[:, 1], size=(opt_restarts, self.dimension))
+
+			# size = 000
+			# x0_array = np.random.uniform(self.bounds[:,0], self.bounds[:,1], size = (size, self.dimension))
+			# for i in range(size):
+			# 	value = min_obj(x0_array[i,:].reshape(-1,1))
+			# 	if value <= min_value:
+			# 		min_x = x0_array[i,:].reshape(-1,1)
+			# 		min_value = value
+
+
+
+			for x0 in x0_array:
+				res = minimize(min_obj, x0 = x0, bounds = self.bounds, method='L-BFGS-B')
+				if res.fun < min_value:
+					min_value = res.fun
+					min_x = res.x
+
+			# res = minimize(min_obj, x0 = min_x, bounds = self.bounds, method = 'L-BFGS-B')
+
+			# Output the minimizer (which is the maximizer of the UCB as we're minimizing -UCB)
+			return min_x.reshape(1,-1), min_value
 		else:
-			x0_array = np.random.uniform(self.bounds[:, 0], self.bounds[:, 1], size=(opt_restarts, self.dimension))
+			ub = [self.mu(np.array([[x]])) + self.beta*self.sigma(np.array([[x]])) for x in self.xbase]
+			maxval = max(ub)
+			maxloc = self.xbase[ub.index(maxval)]
+			res = minimize(min_obj, x0 = np.array([[maxloc]]), bounds = self.bounds, method = 'L-BFGS-B')
 
+			return res.x.reshape(1,-1), res.fun
 
-		for x0 in x0_array:
-			res = minimize(min_obj, x0 = x0, bounds = self.bounds, method='L-BFGS-B')
-			if res.fun < min_value:
-				min_value = res.fun
-				min_x = res.x
-
-		# Output the minimizer (which is the maximizer of the UCB as we're minimizing -UCB)
-		return min_x.reshape(1,-1), min_value
 
 	def find_closest(self,x,indeces):
 		'''
@@ -191,16 +225,19 @@ class UCBOptimizer:
 		return minindex,distance
 
 	def calc_musigma(self):
-		Kn = self.kernel(self.X_sample)
+		self.Kn = self.kernel(self.X_sample)
 		t = self.X_sample.shape[0]
 		eta = 2/t
-		Kinv = np.linalg.inv(Kn+(1+eta)*np.identity(self.X_sample.shape[0]))
-		self.Kinv = Kinv
-		self.mu = lambda x: np.dot(np.dot(self.kernel(x.reshape(1,-1), self.X_sample).reshape(1,-1),
-			Kinv),self.Y_sample)[0,0]
-		self.sigma = lambda x: (self.kernel(x.reshape(1,-1)) - np.dot(np.dot(self.kernel(x.reshape(1,-1), self.X_sample).reshape(1,-1), Kinv),self.kernel(x.reshape(1,-1), self.X_sample).reshape(-1,1)))[0,0]
+		self.KI = self.Kn + (1+eta)*np.identity(self.Kn.shape[0])
+		self.Kinv = np.linalg.inv(self.KI)
+		self.knx = lambda x: self.kernel(self.X_sample,x.reshape(1,-1))
+		# self.mu = lambda x: np.dot(np.dot(self.kernel(x.reshape(1,-1), self.X_sample).reshape(1,-1),
+		# 	Kinv),self.Y_sample)[0,0]
+		# self.sigma = lambda x: (self.kernel(x.reshape(1,-1)) - np.dot(np.dot(self.kernel(x.reshape(1,-1), self.X_sample).reshape(1,-1), Kinv),self.kernel(x.reshape(1,-1), self.X_sample).reshape(-1,1)))[0,0]
+		self.mu = lambda x: (self.knx(x).transpose() @ self.Kinv @ self.Y_sample)[0,0]
+		self.sigma = lambda x: (1 - self.knx(x).transpose() @ self.Kinv @ self.knx(x))[0,0]
 
-		innersqrt = np.linalg.det((1+eta)*np.identity(self.X_sample.shape[0]) + self.kernel(self.X_sample))
+		innersqrt = np.linalg.det(self.KI)
 		self.beta = self.B + self.R*math.sqrt(2*math.log(math.sqrt(innersqrt)/self.delta))
 		pass
 
@@ -253,11 +290,19 @@ class UCBOptimizer:
 			self.UCB_val = -min_val
 			t+=1
 
+			if self.debug and (t%25==0):
+				self.plot_approximation()
+
+			if t%250 == 0:
+				self.xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], (t // 250 + 2)*250).tolist()
+
+
 		print('Assumed maximum value: %.5f'%(-min_val))
 		print('beta at termination: %.5f'%self.beta)
 		print('Final variance at termination: %.5f'%self.term_sigma)
 		print('Final F at termination: %.5f'%F)
 		print('')
+		self.final_iteration = t-1
 		if self.constraints is not None: print('Total number of times samples taken that did not satisfy constraints: %d'%missed_constraints)
 		if self.constraints is not None: print('Indeces in X_sample where the offending samples were taken {}'.format(indeces))
 
@@ -286,3 +331,32 @@ class UCBOptimizer:
 					self.mean_values[i,j] = self.mu(xval)
 					self.ub[i,j] = self.mu(xval) + self.beta*self.sigma(xval)
 					self.lb[i,j] = self.mu(xval) - self.beta*self.sigma(xval)
+
+	def plot_approximation(self):
+		'''
+		Useful for debugging purposes only.  Will plot the 1-d objective function over the feasible space and plot the GPR approximation
+		'''
+		xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], 500)
+		true_val = [self.debug(np.array([[x]])) for x in xbase]
+		ub = [self.mu(np.array([[x]])) + self.beta*self.sigma(np.array([[x]])) for x in xbase]
+		lb = [self.mu(np.array([[x]])) - self.beta*self.sigma(np.array([[x]])) for x in xbase]
+		maxval = max(ub)
+		maxloc = xbase[ub.index(maxval)]
+		fig, ax = plt.subplots()
+		ax.plot(xbase, true_val, lw = 5, color = colors['black'])
+		ax.fill_between(xbase, lb, ub, alpha = 0.5, color = colors['gray'])
+		ax.hlines(maxval, xmin = xbase[0], xmax = xbase[-1], lw = 5, color = colors['red'], ls = '--')
+		ax.vlines(maxloc, ymin = ax.get_ylim()[0], ymax = ax.get_ylim()[1], lw = 5, color = colors['red'], ls = '--')
+		ax.set_xlabel(r'$x$')
+		ax.set_ylabel(r'$y$', rotation = 0)
+		sample_flag = input('Show samples this time? (y/n): ')
+		if sample_flag == 'y':
+			sample_flag = None
+			ax.scatter(self.X_sample, self.Y_sample, marker = 'x', s = 30, color = colors['green'])
+		plt.show()
+		command = input('Enter debugger mode? (y/n): ')
+		if command == 'y':
+			command = None
+			pdb.set_trace()
+		pass
+
