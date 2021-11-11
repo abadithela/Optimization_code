@@ -202,7 +202,6 @@ class UCBOptimizer:
 
 			return res.x.reshape(1,-1), res.fun
 
-
 	def find_closest(self,x,indeces):
 		'''
 		Finds the nearest sample point in the sampled x array to the point x provided that also
@@ -293,7 +292,7 @@ class UCBOptimizer:
 			if self.debug and (t%25==0):
 				self.plot_approximation()
 
-			if t%250 == 0:
+			if t%250 == 0 and self.bounds.shape[0] == 1:
 				self.xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], (t // 250 + 2)*250).tolist()
 
 
