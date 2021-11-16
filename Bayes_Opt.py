@@ -21,10 +21,11 @@ colors = dict(mcolors.BASE_COLORS, **mcolors.CSS4_COLORS)
 plt.rcParams.update({'font.size':24})
 plt.rcParams["figure.figsize"] = (12.8,8)
 
-class UCBOptimizer:
+class CVaR_optimizer:
 	def __init__(self, objective, bounds, B, R=1, delta=0.05, n_restarts = 0,
 		n_init_samples = 5, tolerance = 0.05, length_scale = 1, constraints = None,
-		avail_processors = 1, debug = False):
+		avail_processors = 1, debug = False, granularity = 30, risk_prob = 0.05,
+		lb = -5, ub = 5):
 		# Objective here encodes the objective function to be optimized
 		# Bounds indicates the bounds over which objective is to be optimized.
 		# This algorithm will assume that the bounding region is hyper-rectangular
@@ -72,7 +73,20 @@ class UCBOptimizer:
 		# x is a 1xN numpy array.  Additionally, we assume wlog that each constraint function is to be kept
 		# negative, i.e. the constraints are constraint[i](x) <= 0.
 
-		self.objective = objective
+		# avail_processors: the number of available processors for a parallelized computation speedup.
+		# not implemented atm.
+
+		# debug: Throws a debug flag in the solver wherever required.  Useful for debugging purposes
+
+		# granularity: The granularity with which samples are chosen (uniformly between CVaR bounds)
+		# for samples in the rollout process of the CVaR optimization procedure.
+
+		# risk_prob: the alpha value for the CVaR analysis.
+
+		# lb/ub: the lower and upper bounds of the objective function, respectively (i.e. the objective
+		# function is guaranteed to be within this regime.)
+
+		self.objective = objective        # Should output a real value, a sample of a random variable
 		self.bounds = bounds
 		self.beta = []
 		self.B = B
@@ -82,6 +96,7 @@ class UCBOptimizer:
 		self.sigma = []                   # covariance function respectively.
 		self.dimension = bounds.shape[0]  # Dimensionality of the feasible space
 		self.X_sample = None              # Instantiating a variable to keep track of all sampled, X values
+		self.base_sample = None          # Instantiating a variable to keep track of all un-augmented sampled values
 		self.Y_sample = None              # Instantiating a variable to keep track of all sampled, Y values
 		self.cmax =  -1e6                 # Instantiating a variable to keep track of the current best value
 		self.best_sample = None           # Instantiating a variable to keep track of the current best sample
@@ -97,6 +112,14 @@ class UCBOptimizer:
 		self.avail_processors = avail_processors
 		self.debug = debug
 		self.xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], 500).tolist()
+		self.risk_measure = risk_measure
+		self.granularity = granularity
+		self.alpha = risk_prob
+		self.F = 1e5
+		self.iteration = 0
+		self.riskbounds = [(lb - (1-self.alpha)*ub)/self.alpha, ub]
+		self.totalbounds = np.vstack((self.bounds, np.asarray(self.riskbounds).reshape(1,-1)))
+		self.inner_obj = lambda x,s: s + max((x-s,0))/(1-self.alpha)
 
 	def check_constraints(self,x):
 		if self.constraints == None:
@@ -111,31 +134,126 @@ class UCBOptimizer:
 	def initialize(self, sample = None, observations = None, init_flag = False):
 		# Initialize a starting set of samples and their y-values.  Initial sample size is set to 5
 
+		'''
+		The purpose of this script is to initialize a set of samples self.X_samples and observations
+		self.Y_samples either from scratch or from a set of prior samples and observations
+		'''
+
 		if init_flag == False:
 			sample_flag = False
 			while not sample_flag:
-				self.X_sample = np.random.uniform(self.bounds[:,0], self.bounds[:,1],
+				self.base_sample = np.random.uniform(self.bounds[:,0], self.bounds[:,1],
 					size=(self.n_init_samples,self.dimension))
 				met_constraints_flags = []
 				for i in range(self.n_init_samples):
-					met_constraints_flags.append(self.check_constraints(self.X_sample[i,:].reshape(1,-1)))
+					met_constraints_flags.append(self.check_constraints(self.base_sample[i,:].reshape(1,-1)))
 				sample_flag = sample_flag or all(met_constraints_flags)
 
-			self.Y_sample = np.zeros((self.n_init_samples,1))
 			for i in range(self.n_init_samples):
-				self.Y_sample[i,0] = self.objective(self.X_sample[i,:].reshape(1,-1))
-				if self.Y_sample[i] > self.cmax:
-					self.cmax = self.Y_sample[i,0]
-					self.best_sample = self.X_sample[i,:].reshape(1,-1)
+				self.sample_point(self.base_sample[i,:].reshape(1,-1))
 		elif sample is not None:
-			self.X_sample = sample
-			self.Y_sample = observations
-			self.cmax = np.max(self.Y_sample)
-			observation_list = observations.reshape(-1,).tolist()
-			max_index = observation_list.index(max(observation_list))
-			self.best_sample = self.X_sample[max_index,:].reshape(1,-1)
+			self.base_sample = sample
+			self.sample_point(prior_obs = observations)
 		else:
-			error('The initialization flag was set to False and a prior sample set was not provided')
+			error('the initialization flag was set to False, but a prior sample set was not provided')
+
+	def sample_point(self, sample_point, prior_obs = None):
+		if prior_obs is None:
+			'''
+			No prior observation was provided
+			'''
+			if sample_point.shape[0] == self.dimension+1:
+				'''
+				This sample_point is one which contains the augmented variable 's' to be evaluated.  Code assumes the base sample
+				set was augmented prior to this line of code.
+				'''
+				xval = sample_point[0,:-1].reshape(1,-1)
+				s = sample_point[0,-1]
+				self.X_sample = np.vstack((self.X_sample, sample_point.reshape(1,-1))) # Assumes self.X_sample was initialized prior
+				observation = self.objective(xval)
+				self.Y_sample = np.vstack((self.Y_sample, self.inner_obj(observation, s))) 
+			else:
+				'''
+				We are being asked to sample a point without provision of an augmented variable 's' (rollout over a bunch of 's'
+				and identify the corresponding expectation approximation)
+				'''
+				xval = sample_point.reshape(1,-1)
+				observation = self.objective(xval)
+
+			s_values = np.linspace(self.riskbounds[0], self.riskbounds[1], self.granularity).tolist()
+			for s in s_values:
+				Je_val = self.inner_obj(observation, s)
+				self.X_sample = np.vstack((self.X_sample, np.hstack((xval,s)))) if self.X_sample else np.hstack((xval,s))
+				self.Y_sample = np.vstack((self.Y_sample, Je_val)) if self.Y_sample else np.array([[Je_val]])
+		else:
+			'''
+			A prior observation was provided that is a set of observations without augmented 's' values
+			We will assume observations is a numpy array of size N_obs X 1
+			'''
+			np_obs = prior_obs.shape[0]
+			s_values = np.linspace(self.riskbounds[0], self.riskbounds[1], self.granularity).tolist()
+			for i in range(np_obs):
+				xval = self.base_sample[i,:].reshape(-1,1)
+				observation = prior_obs[i,0]
+				for s in s_values:
+					Je_val = self.inner_obj(observation, s)
+					self.X_sample = np.vstack((self.X_sample, np.hstack((xval,s)))) if self.X_sample else np.hstack((xval,s))
+					self.Y_sample = np.vstack((self.Y_sample, Je_val)) if self.Y_sample else np.array([[Je_val]])
+		pass
+
+	def propose_location(self, N_samples = 1e5):
+		'''
+		This function should propose a new sampling location and augment the self.base_sample list with this new sample
+		The way it should go about this:
+			1) Randomly sample (uniformly over the entire augmented space) N_samples samples
+			2) Pick the sample which maximizes the lower confidence bound - should be defined within this function
+			3) Use that sample as the starting point for a gradient descent minimizer.
+			4) Takes the output of that minimizer as the sample point (should produce a sample point (x^*,s^*))
+		'''
+
+		# Calculate the lower confidence bound
+		def LCB(x):
+			return self.mu(x) - self.beta*self.sigma(x)
+
+		# Helper function for the inner minimization problem
+		def min_obj(xval,s):
+			spt = np.hstack((xval,s))
+			return LCB(spt)
+
+		# The function that should be maximized in the gradient descent portion of this location proposal subroutine
+		def inf_Je(x, min_pt_flag = False):
+			s_values = np.linspace(self.riskbounds[0], self.riskbounds[1], 300).tolist()
+			evaluations = [min_obj(x.reshape(1,-1), s) for s in s_values]
+			best_s = s_values[evaluations.index(min(evaluations))]
+
+			residual_fn = lambda s: min_obj(x.reshape(1,-1), s)
+
+			min_inf = minimize(residual_fn, x0 = best_s, bounds = np.asarray(self.riskbounds).reshape(1,-1), method = 'L-BFGS-B')
+
+			if min_pt_flag:
+				return min_inf.fun, min_inf.x
+			else:
+				return min_inf.fun
+
+		# Step 1: Randomly sample, over the entire augmented space, N_sampels samples
+		init_sample = np.random.uniform(self.totalbounds[:,0], self.totalbounds[:,1], size = (N_samples,self.dimension+1))
+
+		# Step 2: Find the sample that maximizes the LCB
+		evaluations = [LCB(init_sample[i,:].reshape(1,-1)) for i in range(N_samples)]
+		best_sample_index = evaluations.index(max(evaluations))
+		best_sample = init_sample[best_sample_index,:].reshape(1,-1) 
+
+		# Step 3: Use this sample as the seed for a gradient descent maximizer, the objective function
+		# for which is inf_Je (i.e. we want to maximize Je, so we're going to minimize the negation)
+		res = minimize(lambda x: -1*inf_Je(x), x0 = best_sample[0,:-1].reshape(1,-1), bounds = self.bounds, method = 'L-BFGS-B')
+
+		# Step 4: Identify the optimal augmented state (x,s) by running through the inf_Je process again and outputting the minimizing s
+		state_outputs = inf_Je(res.x, min_pt_flag = True)
+		opt_state = np.hstack((res.x.reshape(1,-1), state_outputs[1].reshape(1,1)))
+
+		# Step 5: Update F to reflect this new sample point and return the state to be sampled and the maximum, minimized lower bound 
+		self.F = 2*self.beta*self.sigma(opt_state)
+		return opt_state, -1*state_outputs[0]
 
 	def UCB(self, x):
 		# Calculate the Upper Confidence Bound for a value, x, based on the data-set, (x_sample, y_sample).
@@ -148,81 +266,8 @@ class UCBOptimizer:
 			return -100
 
 	def propose_location(self, opt_restarts = 20, granularity = 50):
-		# Propose the next location to sample (identify the sample point that maximizes the UCB)
-		# This is a nonlinear optimization problem and will require a number of restarts
-		# The number of restarts will be set to min(N_samples+1,25) to expedite computation
-
-		min_value = 1e6      # Keeping track of the current minimum value (min of negation of UCB)
-		min_x = None         # Keeping track of best sample point so far
-
-		def min_obj(x):
-			return -self.UCB(x=x)
-
-		if self.bounds.shape[0] > 1:
-
-
-			# Iterate through opt_restarts IP methods to determine the maximizer of the UCB over the
-			# hyper-rectangle identified by bounds.
-			if self.constraints is not None:
-				x0_array = np.array([])
-				init_state_count = 0
-				while init_state_count <= opt_restarts:
-					sample = np.random.uniform(self.bounds[:,0], self.bounds[:,1], size = (1,self.dimension))
-					if self.check_constraints(sample):
-						x0_array = np.vstack((x0_array,sample)) if x0_array.shape[0]>0 else sample
-						init_state_count += 1
-			else:
-				x0_array = np.random.uniform(self.bounds[:, 0], self.bounds[:, 1], size=(opt_restarts, self.dimension))
-
-			# size = 000
-			# x0_array = np.random.uniform(self.bounds[:,0], self.bounds[:,1], size = (size, self.dimension))
-			# for i in range(size):
-			# 	value = min_obj(x0_array[i,:].reshape(-1,1))
-			# 	if value <= min_value:
-			# 		min_x = x0_array[i,:].reshape(-1,1)
-			# 		min_value = value
-
-
-
-			for x0 in x0_array:
-				res = minimize(min_obj, x0 = x0, bounds = self.bounds, method='L-BFGS-B')
-				if res.fun < min_value:
-					min_value = res.fun
-					min_x = res.x
-
-			# res = minimize(min_obj, x0 = min_x, bounds = self.bounds, method = 'L-BFGS-B')
-
-			# Output the minimizer (which is the maximizer of the UCB as we're minimizing -UCB)
-			return min_x.reshape(1,-1), min_value
-		else:
-			ub = [self.mu(np.array([[x]])) + self.beta*self.sigma(np.array([[x]])) for x in self.xbase]
-			maxval = max(ub)
-			maxloc = self.xbase[ub.index(maxval)]
-			res = minimize(min_obj, x0 = np.array([[maxloc]]), bounds = self.bounds, method = 'L-BFGS-B')
-
-			return res.x.reshape(1,-1), res.fun
-
-	def find_closest(self,x,indeces):
-		'''
-		Finds the nearest sample point in the sampled x array to the point x provided that also
-		satisfies the constraints
-		'''
-		length_list = [None for i in range(self.X_sample.shape[0])]
-		for i in range(self.X_sample.shape[0]):
-			length_list[i] = np.linalg.norm(self.X_sample[i,:].reshape(1,-1)-x)
-
-		if self.constraints is not None:
-			found_nearest = False
-			while not found_nearest:
-				minindex = length_list.index(min(length_list))
-				if minindex in indeces:
-					length_list[minindex] = max(length_list)
-				else:
-					found_nearest = True
-
-		distance = length_list[minindex]
-		return minindex,distance
-
+		pass
+		
 	def calc_musigma(self):
 		self.Kn = self.kernel(self.X_sample)
 		t = self.X_sample.shape[0]
@@ -230,9 +275,6 @@ class UCBOptimizer:
 		self.KI = self.Kn + (1+eta)*np.identity(self.Kn.shape[0])
 		self.Kinv = np.linalg.inv(self.KI)
 		self.knx = lambda x: self.kernel(self.X_sample,x.reshape(1,-1))
-		# self.mu = lambda x: np.dot(np.dot(self.kernel(x.reshape(1,-1), self.X_sample).reshape(1,-1),
-		# 	Kinv),self.Y_sample)[0,0]
-		# self.sigma = lambda x: (self.kernel(x.reshape(1,-1)) - np.dot(np.dot(self.kernel(x.reshape(1,-1), self.X_sample).reshape(1,-1), Kinv),self.kernel(x.reshape(1,-1), self.X_sample).reshape(-1,1)))[0,0]
 		self.mu = lambda x: (self.knx(x).transpose() @ self.Kinv @ self.Y_sample)[0,0]
 		self.sigma = lambda x: (1 - self.knx(x).transpose() @ self.Kinv @ self.knx(x))[0,0]
 
@@ -240,96 +282,57 @@ class UCBOptimizer:
 		self.beta = self.B + self.R*math.sqrt(2*math.log(math.sqrt(innersqrt)/self.delta))
 		pass
 
-	def optimize(self):
-		# Initialize the Squared Exponential Kernel (known to be universal for any parameters)
-		self.kernel = RBF(self.length_scale)
-		F = 100
-		t = 1
-		missed_constraints = 0
-		indeces = []
-
+	def optimizer(self):
+		'''
+		This optimization subroutine should only be run  in the event that the user wants to optimize for the conditional value at risk
+		of a set of distributions.  Steps are as follows:
+			1) Every time the code takes a sample of the robustness meausre, it should roll out granularity evenly spaced evaluations of
+			s + max(sample - s, 0)/(1-alpha).  Here, alpha (self.alpha) should be the confidence interval for the risk analysis
+				a) The composite decision space should be the normal decision space + s (i.e. the optimization problem even over a one 
+			dimensional objective function should be a 2-dimenaionsal optimization problem)
+			2) After sampling and taking rollouts of the objective function, the code should fit a Gaussian Process to the augmented dataset
+			of sample/measurement pairs 
+			3) Now, call the mean function for the fitted Gaussian Process mu(x,s) and standard deviation sigma(x,s).  x is the decision variable
+			and s is the sliding bound used in the CVaR analysis.  The system should proposed the next sample point x as the sample that maximizes
+			the minimum value of the inner objective function over s.  I.e., whereas for normal UCB optimization the acquisition function is
+			to maximize the UCB of the fitted Gaussian Process, in this case, the acquisition function aims to maximize the CVaR of the lower
+			bound of the fitted Gaussian Process.
+			4) After determining the new sample point, rinse and repeat until termination.
+			5) The termination condition here is still the same termination condition, i.e. when F = 2*beta*sigma at the determined sample point x
+		'''
+		
 		self.calc_musigma()
-		new_x, min_val = self.propose_location(opt_restarts = self.X_sample.shape[0]*2)
-		F = 2*self.beta*self.sigma(new_x)
-		self.UCB_sample_pt = new_x
-		self.UCB_val = -min_val
+		'''
+		Determine the next point to sample
+		'''
+		new_augmented_state, maxminval = self.propose_location()
 
-		while F >= self.tol:
+		while self.F > self.tol:
+			'''
+			When sampling the new point, not only should the function sample the objective function, but it should also perform the rollouts
+			and update the dataset accordingly as well.
+			First call will sample the optimal, augmented state (x,s)
+			Second call will sample the state (x) with rollouts over the possible values of (s)
+			As we are going to sample this point (x) we need to add it to the list of base samples 
+			'''
+			self.base_sample = np.vstack((self.base_sample, new_augmented_state[0,:-1].reshape(1,-1)))
+			self.sample_point(new_augmented_state)
+			self.sample_point(new_augmented_state[0,:-1].reshape(1,-1))
 
-			start = time.time()
-			self.term_sigma = self.sigma(new_x)
-			new_y = self.objective(new_x)
-			print('Evaluating new objective function and calculating terminating sigma: %.4f'%(time.time() - start))
-
-			if not self.check_constraints(new_x):
-				missed_constraints += 1
-				indeces.append(self.X_sample.shape[0])
-
-			if new_y > self.cmax:
-				self.cmax = new_y
-				self.best_sample = new_x
-
-			self.X_sample = np.vstack((self.X_sample, new_x))
-			self.Y_sample = np.vstack((self.Y_sample, new_y))
-
-			print('Finshed with iteration %d'%t)
-			print('UCB value at that point: %.5f'%self.UCB_val)
-			print('Current F value: %.5f'%F)
-			print('Required tolerance: %.5f'%self.tol)
-			print('')
-
-			start = time.time()
+			'''
+			After sampling the new point, re-calculate the Gaussian Process and determine a new sample point
+			'''
 			self.calc_musigma()
-			print('Calculating new mu/sigma: %.4f'%(time.time() - start))
-			start = time.time()
-			new_x, min_val = self.propose_location(opt_restarts = self.X_sample.shape[0]*2)
-			print('Finding new location: %.4f'%(time.time() - start))
-			F = 2*self.beta*self.sigma(new_x)
-			self.UCB_sample_pt = new_x
-			self.UCB_val = -min_val
-			t+=1
+			self.iteration+=1
+			new_augmented_state, maxminval = self.propose_location()
 
-			if self.debug and (t%25==0):
-				self.plot_approximation()
+			print('Finished iteration: %d'%self.iteration)
+			print('Termination value at next sample point: %.4f'%self.F)
+			print('Min-Max Value at next sample point: %.3f'%maxminval)
 
-			if t%250 == 0 and self.bounds.shape[0] == 1:
-				self.xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], (t // 250 + 2)*250).tolist()
+		pass
 
-
-		print('Assumed maximum value: %.5f'%(-min_val))
-		print('beta at termination: %.5f'%self.beta)
-		print('Final variance at termination: %.5f'%self.term_sigma)
-		print('Final F at termination: %.5f'%F)
-		print('')
-		self.final_iteration = t-1
-		if self.constraints is not None: print('Total number of times samples taken that did not satisfy constraints: %d'%missed_constraints)
-		if self.constraints is not None: print('Indeces in X_sample where the offending samples were taken {}'.format(indeces))
-
-		if self.bounds.shape[0] == 1:
-			self.xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], 100).tolist()
-			self.mean_values = [None for i in range(100)]
-			self.ub = [None for i in range(100)]
-			self.lb = [None for i in range(100)]
-			for i in range(100):
-				xval = np.array([[self.xbase[i]]])
-				self.mean_values[i] = self.mu(np.array(xval))
-				self.ub = self.mean_values[i] + self.beta*self.sigma(xval)
-				self.lb = self.mean_values[i] - self.beta*self.sigma(xval)
-		elif self.bounds.shape[0] == 2:
-			x = np.linspace(self.bounds[0,0], self.bounds[0,1], 50)
-			y = np.linspace(self.bounds[1,0], self.bounds[1,1], 50)
-			X,Y = np.meshgrid(x,y)
-			self.Xbase = X
-			self.Ybase = Y
-			self.mean_values = np.zeros((50,50))
-			self.ub = np.zeros((50,50))
-			self.lb = np.zeros((50,50))
-			for i in range(50):
-				for j in range(50):
-					xval = np.array([[X[i,j], Y[i,j]]])
-					self.mean_values[i,j] = self.mu(xval)
-					self.ub[i,j] = self.mu(xval) + self.beta*self.sigma(xval)
-					self.lb[i,j] = self.mu(xval) - self.beta*self.sigma(xval)
+		
 
 	def plot_approximation(self):
 		'''
