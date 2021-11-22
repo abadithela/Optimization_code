@@ -24,7 +24,7 @@ plt.rcParams["figure.figsize"] = (12.8,8)
 class UCBOptimizer:
 	def __init__(self, objective, bounds, B, R=1, delta=0.05, n_restarts = 0,
 		n_init_samples = 5, tolerance = 0.05, length_scale = 1, constraints = None,
-		avail_processors = 1, debug = False):
+		avail_processors = 1, debug = False, verbose = True):
 		# Objective here encodes the objective function to be optimized
 		# Bounds indicates the bounds over which objective is to be optimized.
 		# This algorithm will assume that the bounding region is hyper-rectangular
@@ -97,6 +97,7 @@ class UCBOptimizer:
 		self.avail_processors = avail_processors
 		self.debug = debug
 		self.xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], 500).tolist()
+		self.verbose = verbose
 
 	def check_constraints(self,x):
 		if self.constraints == None:
@@ -289,7 +290,7 @@ class UCBOptimizer:
 			self.UCB_val = -min_val
 			t+=1
 
-			if self.debug and (t%25==0):
+			if self.debug and (t%100==0):
 				self.plot_approximation()
 
 			if t%250 == 0 and self.bounds.shape[0] == 1:
@@ -331,12 +332,12 @@ class UCBOptimizer:
 					self.ub[i,j] = self.mu(xval) + self.beta*self.sigma(xval)
 					self.lb[i,j] = self.mu(xval) - self.beta*self.sigma(xval)
 
-	def plot_approximation(self):
+	def plot_approximation(self, smoothness = 500):
 		'''
 		Useful for debugging purposes only.  Will plot the 1-d objective function over the feasible space and plot the GPR approximation
 		'''
-		xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], 500)
-		true_val = [self.debug(np.array([[x]])) for x in xbase]
+		xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], 500).tolist()
+		true_val = [self.debug(x) for x in xbase]
 		ub = [self.mu(np.array([[x]])) + self.beta*self.sigma(np.array([[x]])) for x in xbase]
 		lb = [self.mu(np.array([[x]])) - self.beta*self.sigma(np.array([[x]])) for x in xbase]
 		maxval = max(ub)

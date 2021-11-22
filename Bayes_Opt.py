@@ -25,7 +25,7 @@ class CVaR_optimizer:
 	def __init__(self, objective, bounds, B, R=1, delta=0.05, n_restarts = 0,
 		n_init_samples = 5, tolerance = 0.05, length_scale = 1, constraints = None,
 		avail_processors = 1, debug = False, granularity = 30, risk_prob = 0.05,
-		lb = -5, ub = 5):
+		lb = -5, ub = 5, verbose = False):
 		# Objective here encodes the objective function to be optimized
 		# Bounds indicates the bounds over which objective is to be optimized.
 		# This algorithm will assume that the bounding region is hyper-rectangular
@@ -95,9 +95,9 @@ class CVaR_optimizer:
 		self.mu = []                      # Initializing fields to contain the mean function and
 		self.sigma = []                   # covariance function respectively.
 		self.dimension = bounds.shape[0]  # Dimensionality of the feasible space
-		self.X_sample = None              # Instantiating a variable to keep track of all sampled, X values
-		self.base_sample = None          # Instantiating a variable to keep track of all un-augmented sampled values
-		self.Y_sample = None              # Instantiating a variable to keep track of all sampled, Y values
+		self.X_sample = []                # Instantiating a variable to keep track of all sampled, X values
+		self.base_sample = []             # Instantiating a variable to keep track of all un-augmented sampled values
+		self.Y_sample = []                # Instantiating a variable to keep track of all sampled, Y values
 		self.cmax =  -1e6                 # Instantiating a variable to keep track of the current best value
 		self.best_sample = None           # Instantiating a variable to keep track of the current best sample
 		self.n_init_samples = n_init_samples
@@ -112,7 +112,6 @@ class CVaR_optimizer:
 		self.avail_processors = avail_processors
 		self.debug = debug
 		self.xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], 500).tolist()
-		self.risk_measure = risk_measure
 		self.granularity = granularity
 		self.alpha = risk_prob
 		self.F = 1e5
@@ -120,6 +119,7 @@ class CVaR_optimizer:
 		self.riskbounds = [(lb - (1-self.alpha)*ub)/self.alpha, ub]
 		self.totalbounds = np.vstack((self.bounds, np.asarray(self.riskbounds).reshape(1,-1)))
 		self.inner_obj = lambda x,s: s + max((x-s,0))/(1-self.alpha)
+		self.verbose = verbose
 
 	def check_constraints(self,x):
 		if self.constraints == None:
@@ -162,7 +162,7 @@ class CVaR_optimizer:
 			'''
 			No prior observation was provided
 			'''
-			if sample_point.shape[0] == self.dimension+1:
+			if sample_point.shape[1] == self.dimension+1:
 				'''
 				This sample_point is one which contains the augmented variable 's' to be evaluated.  Code assumes the base sample
 				set was augmented prior to this line of code.
@@ -183,8 +183,9 @@ class CVaR_optimizer:
 			s_values = np.linspace(self.riskbounds[0], self.riskbounds[1], self.granularity).tolist()
 			for s in s_values:
 				Je_val = self.inner_obj(observation, s)
-				self.X_sample = np.vstack((self.X_sample, np.hstack((xval,s)))) if self.X_sample else np.hstack((xval,s))
-				self.Y_sample = np.vstack((self.Y_sample, Je_val)) if self.Y_sample else np.array([[Je_val]])
+				# pdb.set_trace()
+				self.X_sample = np.vstack((self.X_sample, np.hstack((xval,np.array([[s]]))))) if len(self.X_sample) > 0 else np.hstack((xval,np.array([[s]])))
+				self.Y_sample = np.vstack((self.Y_sample, np.array([[Je_val]]))) if len(self.Y_sample) > 0 else np.array([[Je_val]])
 		else:
 			'''
 			A prior observation was provided that is a set of observations without augmented 's' values
@@ -197,11 +198,11 @@ class CVaR_optimizer:
 				observation = prior_obs[i,0]
 				for s in s_values:
 					Je_val = self.inner_obj(observation, s)
-					self.X_sample = np.vstack((self.X_sample, np.hstack((xval,s)))) if self.X_sample else np.hstack((xval,s))
-					self.Y_sample = np.vstack((self.Y_sample, Je_val)) if self.Y_sample else np.array([[Je_val]])
+					self.X_sample = np.vstack((self.X_sample, np.hstack((xval,np.array([[s]]))))) if len(self.X_sample) > 0 else np.hstack((xval,np.array([[s]])))
+					self.Y_sample = np.vstack((self.Y_sample, np.array([[Je_val]]))) if len(self.Y_sample) > 0 else np.array([[Je_val]])
 		pass
 
-	def propose_location(self, N_samples = 1e5):
+	def propose_location(self, N_outer_samples = 100, N_inner_samples = 50, refine_flag = False):
 		'''
 		This function should propose a new sampling location and augment the self.base_sample list with this new sample
 		The way it should go about this:
@@ -217,16 +218,16 @@ class CVaR_optimizer:
 
 		# Helper function for the inner minimization problem
 		def min_obj(xval,s):
-			spt = np.hstack((xval,s))
+			spt = np.hstack((xval,np.array([[s]])))
 			return LCB(spt)
 
 		# The function that should be maximized in the gradient descent portion of this location proposal subroutine
 		def inf_Je(x, min_pt_flag = False):
-			s_values = np.linspace(self.riskbounds[0], self.riskbounds[1], 300).tolist()
+			s_values = np.linspace(self.riskbounds[0], self.riskbounds[1], N_inner_samples).tolist()
 			evaluations = [min_obj(x.reshape(1,-1), s) for s in s_values]
 			best_s = s_values[evaluations.index(min(evaluations))]
 
-			residual_fn = lambda s: min_obj(x.reshape(1,-1), s)
+			residual_fn = lambda s: min_obj(x.reshape(1,-1), s[0])
 
 			min_inf = minimize(residual_fn, x0 = best_s, bounds = np.asarray(self.riskbounds).reshape(1,-1), method = 'L-BFGS-B')
 
@@ -235,25 +236,46 @@ class CVaR_optimizer:
 			else:
 				return min_inf.fun
 
-		# Step 1: Randomly sample, over the entire augmented space, N_sampels samples
-		init_sample = np.random.uniform(self.totalbounds[:,0], self.totalbounds[:,1], size = (N_samples,self.dimension+1))
+		# Step 1: Randomly sample, over the entire augmented space, N_outer_samples samples
+		start = time.time()
+		init_sample = np.random.uniform(self.bounds[:,0], self.bounds[:,1], size = (N_outer_samples,self.dimension))
 
-		# Step 2: Find the sample that maximizes the LCB
-		evaluations = [LCB(init_sample[i,:].reshape(1,-1)) for i in range(N_samples)]
-		best_sample_index = evaluations.index(max(evaluations))
-		best_sample = init_sample[best_sample_index,:].reshape(1,-1) 
+		# Step 2: For each sample x in init_sample, identify the minimizing s that minimizes the LCB at that state x.
+		# Then report the best sample as that sample x that has the highest minimum value over all s.
+		svals = np.random.uniform(self.riskbounds[0], self.riskbounds[1], size = (N_inner_samples,)).tolist()
+		sample_values = [min([LCB(np.hstack((x.reshape(1,-1), np.array([[s]])))) for s in svals]) for x in init_sample]
+		best_sample_index = sample_values.index(max(sample_values))
+		best_x = init_sample[best_sample_index,:].reshape(1,-1)
+		s_sweep = [LCB(np.hstack((best_x.reshape(1,-1), np.array([[s]])))) for s in svals]
+		best_s = svals[s_sweep.index(min(s_sweep))]
+		best_sample = np.hstack((best_x, np.array([[best_s]])))
 
-		# Step 3: Use this sample as the seed for a gradient descent maximizer, the objective function
-		# for which is inf_Je (i.e. we want to maximize Je, so we're going to minimize the negation)
-		res = minimize(lambda x: -1*inf_Je(x), x0 = best_sample[0,:-1].reshape(1,-1), bounds = self.bounds, method = 'L-BFGS-B')
+		# # Step 2: Find the sample that maximizes the LCB
+		# start = time.time()
+		# evaluations = [LCB(init_sample[i,:].reshape(1,-1)) for i in range(init_sample.shape[0])]
+		# best_sample_index = evaluations.index(max(evaluations))
+		# best_sample = init_sample[best_sample_index,:].reshape(1,-1)
+		if self.verbose: print('Best sample determination: %.4f'%(time.time() - start))
+		# pdb.set_trace()
 
-		# Step 4: Identify the optimal augmented state (x,s) by running through the inf_Je process again and outputting the minimizing s
-		state_outputs = inf_Je(res.x, min_pt_flag = True)
-		opt_state = np.hstack((res.x.reshape(1,-1), state_outputs[1].reshape(1,1)))
+		if refine_flag:
 
-		# Step 5: Update F to reflect this new sample point and return the state to be sampled and the maximum, minimized lower bound 
-		self.F = 2*self.beta*self.sigma(opt_state)
-		return opt_state, -1*state_outputs[0]
+			# Step 3: Use this sample as the seed for a gradient descent maximizer, the objective function
+			# for which is inf_Je (i.e. we want to maximize Je, so we're going to minimize the negation)
+			start = time.time()
+			res = minimize(lambda x: -1*inf_Je(x), x0 = best_sample[0,:-1].reshape(1,-1), bounds = self.bounds, method = 'L-BFGS-B')
+			if self.verbose: print('Best sample refinement time: %.4f'%(time.time() - start))
+
+			# Step 4: Identify the optimal augmented state (x,s) by running through the inf_Je process again and outputting the minimizing s
+			state_outputs = inf_Je(res.x, min_pt_flag = True)
+			opt_state = np.hstack((res.x.reshape(1,-1), state_outputs[1].reshape(1,1)))
+
+			# Step 5: Update F to reflect this new sample point and return the state to be sampled and the maximum, minimized lower bound 
+			self.F = 2*self.beta*self.sigma(opt_state)
+			return opt_state, state_outputs[0]
+		else:
+			self.F = 2*self.beta*self.sigma(best_sample)
+			return best_sample, sample_values[best_sample_index]
 
 	def UCB(self, x):
 		# Calculate the Upper Confidence Bound for a value, x, based on the data-set, (x_sample, y_sample).
@@ -264,9 +286,6 @@ class CVaR_optimizer:
 			return self.mu(x) + self.beta*self.sigma(x)
 		else:
 			return -100
-
-	def propose_location(self, opt_restarts = 20, granularity = 50):
-		pass
 		
 	def calc_musigma(self):
 		self.Kn = self.kernel(self.X_sample)
@@ -282,7 +301,7 @@ class CVaR_optimizer:
 		self.beta = self.B + self.R*math.sqrt(2*math.log(math.sqrt(innersqrt)/self.delta))
 		pass
 
-	def optimizer(self):
+	def optimize(self):
 		'''
 		This optimization subroutine should only be run  in the event that the user wants to optimize for the conditional value at risk
 		of a set of distributions.  Steps are as follows:
@@ -300,7 +319,7 @@ class CVaR_optimizer:
 			4) After determining the new sample point, rinse and repeat until termination.
 			5) The termination condition here is still the same termination condition, i.e. when F = 2*beta*sigma at the determined sample point x
 		'''
-		
+		self.kernel = RBF(1.0)
 		self.calc_musigma()
 		'''
 		Determine the next point to sample
@@ -322,44 +341,56 @@ class CVaR_optimizer:
 			'''
 			After sampling the new point, re-calculate the Gaussian Process and determine a new sample point
 			'''
+			start = time.time()
 			self.calc_musigma()
+			if self.verbose: print('Gaussian Process calculation time: %.4f'%(time.time() - start))
 			self.iteration+=1
 			new_augmented_state, maxminval = self.propose_location()
 
+			if self.debug and self.iteration % 20 == 0:
+				self.check_approximation()				
+
 			print('Finished iteration: %d'%self.iteration)
 			print('Termination value at next sample point: %.4f'%self.F)
-			print('Min-Max Value at next sample point: %.3f'%maxminval)
+			print('Max-Min Value at next sample point: %.3f'%maxminval)
+			print(' ')
 
 		pass
 
-		
-
-	def plot_approximation(self):
+	def check_approximation(self, size = 50):
 		'''
 		Useful for debugging purposes only.  Will plot the 1-d objective function over the feasible space and plot the GPR approximation
 		'''
-		xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], 500)
-		true_val = [self.debug(np.array([[x]])) for x in xbase]
-		ub = [self.mu(np.array([[x]])) + self.beta*self.sigma(np.array([[x]])) for x in xbase]
-		lb = [self.mu(np.array([[x]])) - self.beta*self.sigma(np.array([[x]])) for x in xbase]
-		maxval = max(ub)
-		maxloc = xbase[ub.index(maxval)]
-		fig, ax = plt.subplots()
-		ax.plot(xbase, true_val, lw = 5, color = colors['black'])
-		ax.fill_between(xbase, lb, ub, alpha = 0.5, color = colors['gray'])
-		ax.hlines(maxval, xmin = xbase[0], xmax = xbase[-1], lw = 5, color = colors['red'], ls = '--')
-		ax.vlines(maxloc, ymin = ax.get_ylim()[0], ymax = ax.get_ylim()[1], lw = 5, color = colors['red'], ls = '--')
+		xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], size)
+		sbase = np.linspace(self.riskbounds[0], self.riskbounds[1], size)
+		X,S = np.meshgrid(xbase,sbase)
+		Z = np.zeros((size,size))
+		US = np.zeros((size,size))
+		LS = np.zeros((size,size))
+		for i in range(size):
+			for j in range(size):
+				xval = np.array([[X[i,j]]])
+				sval = S[i,j]
+				Z[i,j] = sum([self.inner_obj(x = self.objective(xval), s = sval) for i in range(50)])/50
+				aug_state = np.array([[xval[0,0], sval]])
+				US[i,j] = self.mu(aug_state) + self.beta*self.sigma(aug_state)
+				LS[i,j] = self.mu(aug_state) - self.beta*self.sigma(aug_state)
+
+		fig, ax = plt.subplots(subplot_kw=dict(projection="3d"))
+		ax.plot_surface(X,S,LS, color = colors['blue'], alpha = 0.5, lw = 3)
+		ax.plot_surface(X,S,Z, color = colors['black'], lw = 3)
+		ax.plot_surface(X,S,US, color = colors['blue'], alpha = 0.5, lw = 3)
 		ax.set_xlabel(r'$x$')
-		ax.set_ylabel(r'$y$', rotation = 0)
-		sample_flag = input('Show samples this time? (y/n): ')
-		if sample_flag == 'y':
-			sample_flag = None
-			ax.scatter(self.X_sample, self.Y_sample, marker = 'x', s = 30, color = colors['green'])
+		ax.set_ylabel(r'$s$', rotation = 0)
+		ax.xaxis.labelpad = 20
+		ax.yaxis.labelpad = 20
 		plt.show()
 		command = input('Enter debugger mode? (y/n): ')
 		if command == 'y':
 			command = None
 			pdb.set_trace()
+		self.pre_US = US
+		self.pre_LS = LS
 		pass
 
 	
