@@ -65,6 +65,10 @@ class unicycle():
 			LgV = error.transpose() @ self.P @ self.g()
 			return np.linalg.pinv(LgV)*(-alpha*V)
 
+
+	def f(self):
+		return np.array([[0,0,0]]).transpose()
+
 	def g(self):
 		return np.array([[np.cos(self.x[2,0]), 0],[np.sin(self.x[2,0]),0],[0,1]])
 
@@ -74,7 +78,7 @@ class unicycle():
 		a vector of two elements for the control input (the linear and angular velocity,
 		the angular velocity should be in radians)
 		'''
-		xdot = self.g() @ ctrl_input
+		xdot = self.f() + self.g() @ ctrl_input
 		return xdot
 
 	def reset_angle(self):
