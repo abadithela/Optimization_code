@@ -98,6 +98,7 @@ class UCBOptimizer:
 		self.debug = debug
 		self.xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], 500).tolist()
 		self.verbose = verbose
+		self.kernel = RBF(self.length_scale)
 
 	def check_constraints(self,x):
 		if self.constraints == None:
@@ -175,23 +176,11 @@ class UCBOptimizer:
 			else:
 				x0_array = np.random.uniform(self.bounds[:, 0], self.bounds[:, 1], size=(opt_restarts, self.dimension))
 
-			# size = 000
-			# x0_array = np.random.uniform(self.bounds[:,0], self.bounds[:,1], size = (size, self.dimension))
-			# for i in range(size):
-			# 	value = min_obj(x0_array[i,:].reshape(-1,1))
-			# 	if value <= min_value:
-			# 		min_x = x0_array[i,:].reshape(-1,1)
-			# 		min_value = value
-
-
-
 			for x0 in x0_array:
 				res = minimize(min_obj, x0 = x0, bounds = self.bounds, method='L-BFGS-B')
 				if res.fun < min_value:
 					min_value = res.fun
 					min_x = res.x
-
-			# res = minimize(min_obj, x0 = min_x, bounds = self.bounds, method = 'L-BFGS-B')
 
 			# Output the minimizer (which is the maximizer of the UCB as we're minimizing -UCB)
 			return min_x.reshape(1,-1), min_value
@@ -202,27 +191,6 @@ class UCBOptimizer:
 			res = minimize(min_obj, x0 = np.array([[maxloc]]), bounds = self.bounds, method = 'L-BFGS-B')
 
 			return res.x.reshape(1,-1), res.fun
-
-	def find_closest(self,x,indeces):
-		'''
-		Finds the nearest sample point in the sampled x array to the point x provided that also
-		satisfies the constraints
-		'''
-		length_list = [None for i in range(self.X_sample.shape[0])]
-		for i in range(self.X_sample.shape[0]):
-			length_list[i] = np.linalg.norm(self.X_sample[i,:].reshape(1,-1)-x)
-
-		if self.constraints is not None:
-			found_nearest = False
-			while not found_nearest:
-				minindex = length_list.index(min(length_list))
-				if minindex in indeces:
-					length_list[minindex] = max(length_list)
-				else:
-					found_nearest = True
-
-		distance = length_list[minindex]
-		return minindex,distance
 
 	def calc_musigma(self):
 		self.Kn = self.kernel(self.X_sample)
@@ -243,9 +211,8 @@ class UCBOptimizer:
 
 	def optimize(self):
 		# Initialize the Squared Exponential Kernel (known to be universal for any parameters)
-		self.kernel = RBF(self.length_scale)
 		F = 100
-		t = 1
+		t = 0
 		missed_constraints = 0
 		indeces = []
 
@@ -290,19 +257,27 @@ class UCBOptimizer:
 			self.UCB_val = -min_val
 			t+=1
 
-			if self.debug and (t%100==0):
+			if self.debug and (t%25==0):
 				self.plot_approximation()
 
 			if t%250 == 0 and self.bounds.shape[0] == 1:
 				self.xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], (t // 250 + 2)*250).tolist()
 
+			if F < self.tol:
+				print('Possibly found an answer, verifying if answer is correct')
+				new_x, min_val = self.propose_location(opt_restarts = self.X_sample.shape[0]*10)
+				F = 2*self.beta*self.sigma(new_x)
+				self.UCB_sample_pt = new_x
+				self.UCB_val = -min_val
 
-		print('Assumed maximum value: %.5f'%(-min_val))
+
+
+		print('Calculated maximum value: %.5f'%(-min_val))
 		print('beta at termination: %.5f'%self.beta)
 		print('Final variance at termination: %.5f'%self.term_sigma)
 		print('Final F at termination: %.5f'%F)
 		print('')
-		self.final_iteration = t-1
+		self.final_iteration = t
 		if self.constraints is not None: print('Total number of times samples taken that did not satisfy constraints: %d'%missed_constraints)
 		if self.constraints is not None: print('Indeces in X_sample where the offending samples were taken {}'.format(indeces))
 
@@ -332,33 +307,63 @@ class UCBOptimizer:
 					self.ub[i,j] = self.mu(xval) + self.beta*self.sigma(xval)
 					self.lb[i,j] = self.mu(xval) - self.beta*self.sigma(xval)
 
-	def plot_approximation(self, smoothness = 500):
+	def plot_approximation(self, smoothness = 500, figtitle = None, save = False, fname = None, label = None):
 		'''
 		Useful for debugging purposes only.  Will plot the 1-d objective function over the feasible space and plot the GPR approximation
 		'''
-		xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], 500).tolist()
-		true_val = [self.debug(x) for x in xbase]
-		ub = [self.mu(np.array([[x]])) + self.beta*self.sigma(np.array([[x]])) for x in xbase]
-		lb = [self.mu(np.array([[x]])) - self.beta*self.sigma(np.array([[x]])) for x in xbase]
-		maxval = max(ub)
-		maxloc = xbase[ub.index(maxval)]
-		fig, ax = plt.subplots()
-		ax.plot(xbase, true_val, lw = 5, color = colors['black'])
-		ax.fill_between(xbase, lb, ub, alpha = 0.5, color = colors['gray'])
-		ax.hlines(maxval, xmin = xbase[0], xmax = xbase[-1], lw = 5, color = colors['red'], ls = '--')
-		ax.vlines(maxloc, ymin = ax.get_ylim()[0], ymax = ax.get_ylim()[1], lw = 5, color = colors['red'], ls = '--')
-		ax.set_xlabel(r'$x$')
-		ax.set_ylabel(r'$y$', rotation = 0)
-		sample_flag = input('Show samples this time? (y/n): ')
-		if sample_flag == 'y':
-			sample_flag = None
-			ax.scatter(self.X_sample, self.Y_sample, marker = 'x', s = 30, color = colors['green'])
-		plt.show()
-		command = input('Enter debugger mode? (y/n): ')
-		if command == 'y':
-			command = None
+		if self.bounds.shape[0] == 1:
+			xbase = np.linspace(self.bounds[0,0], self.bounds[0,1], 500).tolist()
+			true_val = [self.debug(x) for x in xbase]
+			ub = [self.mu(np.array([[x]])) + self.beta*self.sigma(np.array([[x]])) for x in xbase]
+			lb = [self.mu(np.array([[x]])) - self.beta*self.sigma(np.array([[x]])) for x in xbase]
+			maxval = max(ub)
+			maxloc = xbase[ub.index(maxval)]
+			fig, ax = plt.subplots()
+			if label is not None:
+				ax.plot(xbase, true_val, lw = 5, color = colors['black'], label = label)
+			else:
+				ax.plot(xbase, true_val, lw = 5, color = colors['black'])
+			ax.fill_between(xbase, lb, ub, alpha = 0.5, color = colors['gray'], label = r'$\mathrm{GP~bounds}$')
+			ax.hlines(maxval, xmin = xbase[0], xmax = xbase[-1], lw = 5, color = colors['red'], ls = '--')
+			# ax.vlines(maxloc, ymin = ax.get_ylim()[0], ymax = ax.get_ylim()[1], lw = 5, color = colors['red'], ls = '--')
+			ax.set_xlabel(r'$x$')
+			ax.set_ylabel(r'$y$', rotation = 0)
+			sample_flag = input('Show samples this time? (y/n): ')
+			if sample_flag == 'y':
+				sample_flag = None
+				ax.scatter(self.X_sample, self.Y_sample, marker = 'x', s = 50, color = colors['green'], label = r'$\mathrm{samples}$')
+			if figtitle is not None: ax.set_title(figtitle)
+			ax.grid(lw = 3, alpha = 0.5)
+			ax.legend(loc = 'best')
+			plt.tight_layout()
+			if save: plt.savefig(fname = fname, bbox_inches = 'tight', pad_inches = 0.1, dpi = 200)
+			plt.show()
+			command = input('Enter debugger mode? (y/n): ')
+			if command == 'y':
+				command = None
+				pdb.set_trace()
+			pass
+		elif self.bounds.shape[0] == 2:
+			xbase = np.linspace(self.bounds[0,0],self.bounds[0,1],100)
+			ybase = np.linspace(self.bounds[1,0],self.bounds[1,1],100)
+			X,Y = np.meshgrid(xbase,ybase)
+			Z = np.zeros((100,100))
+			US = np.zeros((100,100))
+			LS = np.zeros((100,100))
+			for i in range(100):
+				for j in range(100):
+					x = np.array([[X[i,j],Y[i,j]]])
+					Z[i,j] = self.debug(x)
+					US[i,j] = self.mu(x) + self.beta*self.sigma(x)
+					LS[i,j] = self.mu(x) - self.beta*self.sigma(x)
+			fig, ax = plt.subplots(subplot_kw = dict(projection = '3d'))
+			ax.plot_surface(X,Y,Z, color = colors['black'])
+			ax.plot_surface(X,Y,US, color = colors['red'], alpha = 0.5)
+			ax.plot_surface(X,Y,LS, color = colors['red'], alpha = 0.5)
+			plt.show()
+			print('Entering debugging mode:')
 			pdb.set_trace()
-		pass
+			pass
 
 	
 

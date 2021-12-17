@@ -41,12 +41,29 @@ class unicycle():
 	def __init__(self, init_state = np.zeros((3,1)), dt = 0.01):
 		self.x = init_state
 		self.xhist = init_state
-		self.uhist = []
+		self.uhist = None
 		self.dt = dt
 		self.pi = math.pi
+		self.P = np.diag([5,5,0.2])
 
 	def controller(self):
+		'''
+		To be populated with whatever controller you would like to steer this system with
+		'''
 		pass
+
+	def base_controller(self, goal, c, alpha):
+		'''
+		Will populate this method with a baseline Lyapunov controller that gets to a goal.  Goal will be
+		to produce a control input u that minimizes a baseline Lyapunov function with a decay constant specified by alpha
+		'''
+		error = self.x - goal
+		V = 1/2*error.transpose() @ self.P @ error
+		if V <= c:
+			return np.zeros((2,1))
+		else:	
+			LgV = error.transpose() @ self.P @ self.g()
+			return np.linalg.pinv(LgV)*(-alpha*V)
 
 	def g(self):
 		return np.array([[np.cos(self.x[2,0]), 0],[np.sin(self.x[2,0]),0],[0,1]])
@@ -73,7 +90,7 @@ class unicycle():
 		self.interior_dt = self.dt/spacing
 		for tsteps in range(steps):
 			ctrl_input = self.controller()
-			self.uhist.append(ctrl_input)
+			self.uhist = np.hstack((self.uhist, ctrl_input)) if self.uhist is not None else ctrl_input
 			for splices in range(spacing):
 				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
 			self.reset_angle()
