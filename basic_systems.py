@@ -99,6 +99,56 @@ class unicycle():
 				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
 			self.reset_angle()
 			self.xhist = np.hstack((self.xhist, self.x))
+
+class pendulumn():
+	def __init__(self, init_state = np.zeros((2,1)), dt = 0.01):
+		self.x = init_state
+		self.xhist = init_state
+		self.uhist = None
+		self.dt = dt
+		self.pi = math.pi
+		self.g = -9.81
+		self.l = 1
+
+	def controller(self):
+		'''
+		To be populated with whatever controller you would like to steer this system with
+		'''
+		pass
+
+	def f(self):
+		return np.array([[self.x[1,0], -self.g/self.l*np.sin(self.x[0,0])]]).transpose()
+
+	def g(self):
+		return np.array([[0,1]]).transpose()
+
+	def dynamics(self,ctrl_input):
+		'''
+		Assumes the controller method for this class is populated by a method that outputs
+		a vector of two elements for the control input (the linear and angular velocity,
+		the angular velocity should be in radians)
+		'''
+		xdot = self.f() + self.g() @ ctrl_input
+		return xdot
+
+	def reset_angle(self):
+		result = self.x[2,0] % (2*self.pi)
+		if result <= math.pi:
+			self.x[2,0] = result
+		else:
+			self.x[2,0] = result - 2*math.pi
+		pass
+
+
+	def simulate(self, steps = 20, spacing = 100):
+		self.interior_dt = self.dt/spacing
+		for tsteps in range(steps):
+			ctrl_input = self.controller()
+			self.uhist = np.hstack((self.uhist, ctrl_input)) if self.uhist is not None else ctrl_input
+			for splices in range(spacing):
+				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
+			self.reset_angle()
+			self.xhist = np.hstack((self.xhist, self.x))
 		
 
 class nonlinear():
