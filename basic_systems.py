@@ -99,6 +99,7 @@ class unicycle():
 				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
 			self.reset_angle()
 			self.xhist = np.hstack((self.xhist, self.x))
+		
 
 class nonlinear():
 	def __init__(self, init_state = np.zeros((3,1)), dt = 0.01):
