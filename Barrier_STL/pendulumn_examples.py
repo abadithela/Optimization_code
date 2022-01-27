@@ -74,18 +74,18 @@ def get_h(L,z,x,c):
 	h = lambda x: c**2 - L**2*(LA.norm(x - z))**2
 	return h
 
-def construct_cbf(pendulum, L, zt, c, system):
+def construct_cbf(pendulum, L, c, system):
 	'''
 	Constructing barrier function from Lipschitz constant L and signal z
 	'''
-	xt = pendulum.x
-	f = pendulum.f()
-	g = pendulum.g()
-	cbf = get_h(L, zt, xt, c)
-	dhdx = lambda x: 2*L**2 * (xt - zt)
-	dzdt =
-	dhdt = lambda x: 2*L**2 * (xt - zt) @ (system.dzdt)
-	alpha = lambda x: 1*xt
+	xt = lambda x: pendulum.x
+	f = lambda pendulum: pendulum.f()
+	g = lambda pendulum: pendulum.g()
+	cbf = lambda xt, zt: get_h(L, zt, xt, c)
+	dhdx = lambda xt, zt: 2*L**2 * (xt - zt)
+	dzdt = lambda zt: (system.A - system.B @ system.P)@zt
+	dhdt = lambda xt, zt: 2*L**2 * (xt - zt) @ (dzdt)
+	alpha = lambda xt: 1*xt
 	return f,g,cbf, dhdx, dhdt, alpha
 
 
@@ -94,6 +94,7 @@ def get_CBF_controller(f,g,h,dhdx, alpha):
 	u = QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, h = h,
 		dhdx = dhdx, alpha = alpha, dhdt = dhdt)
          return u
+
 if __name__ == '__main__':
 	portray_system()
 	system = initialize_system()
@@ -101,6 +102,8 @@ if __name__ == '__main__':
 	L = 1
 	z = system.xhist
 	pendulum = pendulumn(init_state = np.array([[np.pi],[0]]), dt = 0.01)
-	for zt in
-	f,g,cbf, dhdx, dhdt, alpha = construct_cbf(pendulum, L, zt, c, system)
-	u = get_CBF_controller(f,g,cbf,dhdx, dhdt, alpha)
+	f,g,cbf, dhdx, dhdt, alpha = construct_cbf(pendulum, L, c, system)
+
+	for t in range(len(z[0])):
+		zt = z[:,t]
+		u = get_CBF_controller(f,g,cbf,dhdx, dhdt, alpha)
