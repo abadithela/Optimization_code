@@ -91,7 +91,40 @@ def construct_cbf(pendulum, L, c, system):
 def get_CBF_controller(f,g,h,dhdx, alpha):
 	u = QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, h = h,
 		dhdx = dhdx, alpha = alpha, dhdt = dhdt)
-         return u
+	return u
+
+def true_system_simulation():
+	'''
+	Steps:
+		1) Initialize the pendulumn system
+		2) Construct the Pendulumn System's controler
+			a) The controller should be a QP-CBF controller that filters against
+			a provided control input
+			b) This controller should follow the robustness setup from prior.
+	'''
+	pend_sys = pendulumn(init_state = np.array([[math.pi,0]]).transpose(), dt = 0.01)
+
+	'''
+	Calculate the robustness of the linear system expert trajectory
+	'''
+	expert_system = initialize_system()
+	expert_system.simulate(steps = 500)
+	c = robustness(system = expert_system)
+
+	'''
+	Construct the corresponding barrier function.
+		Note: Convert the time to a time-step so that the appropriate indexed
+		state can be identified in expert_system.xhist
+	'''
+	def h(x,t,c,expert_system):
+		time_step = t/dt
+		return c**2 - np.linalg.norm(x-expert_system.xhist[:,time_step].reshape(-1,1))**2
+
+	'''
+	Construct dhdx in a similar fashion
+	'''
+	pass
+
 
 if __name__ == '__main__':
 	portray_system()
