@@ -70,7 +70,7 @@ def portray_system(system = initialize_system(), horizon = 500):
 
 # Constructing Barrier function for requirement of eventually reaching the upright position in 	T < 2 seconds.
 
-def get_h(L,z,x,c):
+def get_h(L,z,x,c,t, dt):
 	h = lambda x: c**2 - L**2*(LA.norm(x - z))**2
 	return h
 
@@ -78,7 +78,7 @@ def construct_cbf(pendulum, L, c, system):
 	'''
 	Constructing barrier function from Lipschitz constant L and signal z
 	'''
-	xt = lambda x: pendulum.x
+	xt = lambda pendulum: pendulum.x
 	f = lambda pendulum: pendulum.f()
 	g = lambda pendulum: pendulum.g()
 	cbf = lambda xt, zt: get_h(L, zt, xt, c)
@@ -87,8 +87,6 @@ def construct_cbf(pendulum, L, c, system):
 	dhdt = lambda xt, zt: 2*L**2 * (xt - zt) @ (dzdt)
 	alpha = lambda xt: 1*xt
 	return f,g,cbf, dhdx, dhdt, alpha
-
-
 
 def get_CBF_controller(f,g,h,dhdx, alpha):
 	u = QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, h = h,
@@ -106,4 +104,5 @@ if __name__ == '__main__':
 
 	for t in range(len(z[0])):
 		zt = z[:,t]
+		xt = pendulum.simulate(step=1)
 		u = get_CBF_controller(f,g,cbf,dhdx, dhdt, alpha)
