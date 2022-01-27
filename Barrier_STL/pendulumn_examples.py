@@ -34,8 +34,18 @@ def initialize_system():
 	K = B.transpose() @ P
 
 	controller = lambda x: -K @ system.x
+	dzdt = lambda x: (A - B @ R.inv() @ B.transpose() @ P) @ system.x
 	system.controller = types.MethodType(controller, system)
+	system.dzdt = types.MethodType(dzdt, system)
 	return system
+
+def robustness(system = initialize_system()):
+	'''
+	This function calculate sthe robustness of a given input signal saved in the state trajectory
+	of a system class, the default value for which is provided.
+	'''
+	norm_seq = [0.2 - np.abs(system.xhist[0,i] - math.pi/2) for i in range(system.xhist.shape[1])]
+	return max(norm_seq)
 
 def portray_system(system = initialize_system(), horizon = 500):
 	'''
@@ -52,6 +62,7 @@ def portray_system(system = initialize_system(), horizon = 500):
 	ax.grid(lw = 3, alpha = 0.5)
 	ax.legend(loc = 'best')
 	plt.show()
+	robustness(system = system)
 	pass
 
 # Constructing Barrier function for requirement of eventually reaching the upright position in 	T < 2 seconds.
