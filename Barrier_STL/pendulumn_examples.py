@@ -23,14 +23,6 @@ colors = dict(mcolors.BASE_COLORS, **mcolors.CSS4_COLORS)
 plt.rcParams.update({'font.size':28})
 plt.rcParams["figure.figsize"] = (12.8,8)
 
-def robustness(system = initialize_system()):
-	'''
-	This function calculate sthe robustness of a given input signal saved in the state trajectory
-	of a system class, the default value for which is provided.
-	'''
-	norm_seq = [0.2 - np.abs(system.xhist[0,i] - math.pi/2) for i in range(system.xhist.shape[1])]
-	return max(norm_seq)
-
 def initialize_system():
 	system = linear_sys(init_state = np.array([[math.pi,0]]).transpose())
 
@@ -47,6 +39,14 @@ def initialize_system():
 	system.dzdt = types.MethodType(dzdt, system)
 	return system
 
+def robustness(system = initialize_system()):
+	'''
+	This function calculate sthe robustness of a given input signal saved in the state trajectory
+	of a system class, the default value for which is provided.
+	'''
+	norm_seq = [0.2 - np.abs(system.xhist[0,i] - math.pi/2) for i in range(system.xhist.shape[1])]
+	return max(norm_seq)
+
 def portray_system(system = initialize_system(), horizon = 500):
 	'''
 	This function should portray the state history of a given example pendulumn system
@@ -62,6 +62,7 @@ def portray_system(system = initialize_system(), horizon = 500):
 	ax.grid(lw = 3, alpha = 0.5)
 	ax.legend(loc = 'best')
 	plt.show()
+	robustness(system = system)
 	pass
 
 # Constructing Barrier function for requirement of eventually reaching the upright position in 	T < 2 seconds.
@@ -81,7 +82,7 @@ def construct_cbf(L, z):
 	alpha = lambda x: 2*x
 	return f,g,cbf, dhdx, alpha
 
-def get_CBF_controller(f,g,h,dhdx, alpha)
+def get_CBF_controller(f,g,h,dhdx, alpha):
 	u = QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, h = h, dhdx = dhdx, alpha = alpha)
 	return u
 
