@@ -32,6 +32,7 @@ def initialize_system():
 	B = system.B
 	P = LA.solve_continuous_are(A,B,Q,R)
 	K = B.transpose() @ P
+	system.P = P
 
 	controller = lambda x: -K @ system.x
 	dzdt = lambda x: (A - B @ R.inv() @ B.transpose() @ P) @ system.x
@@ -61,8 +62,9 @@ def portray_system(system = initialize_system(), horizon = 500):
 	ax.set_title(r'$\mathrm{Example~Trajectory}$')
 	ax.grid(lw = 3, alpha = 0.5)
 	ax.legend(loc = 'best')
+	c = robustness(system = system)
+	print('The robustness of this system trajectory is %.4f'%c)
 	plt.show()
-	robustness(system = system)
 	pass
 
 # Constructing Barrier function for requirement of eventually reaching the upright position in 	T < 2 seconds.
