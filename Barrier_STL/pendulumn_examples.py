@@ -32,6 +32,7 @@ def initialize_system():
 	B = system.B
 	P = LA.solve_continuous_are(A,B,Q,R)
 	K = B.transpose() @ P
+	system.P = P
 
 	controller = lambda x: -K @ system.x
 	dzdt = lambda x: (A - B @ R.inv() @ B.transpose() @ P) @ system.x
@@ -61,6 +62,8 @@ def portray_system(system = initialize_system(), horizon = 500):
 	ax.set_title(r'$\mathrm{Example~Trajectory}$')
 	ax.grid(lw = 3, alpha = 0.5)
 	ax.legend(loc = 'best')
+	c = robustness(system = system)
+	print('The robustness of this system trajectory is %.4f'%c)
 	plt.show()
 	robustness(system = system)
 	pass
@@ -85,11 +88,12 @@ def construct_cbf(pendulum, L, zt, c, system):
 	alpha = lambda x: 1*xt
 	return f,g,cbf, dhdx, dhdt, alpha
 
-def get_CBF_controller(f,g,h,dhdx, dhdt, alpha):
-	u = QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, h = h, dhdx = dhdx, alpha = alpha, dhdt = dhdt)
-	return u
 
 
+def get_CBF_controller(f,g,h,dhdx, alpha):
+	u = QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, h = h,
+		dhdx = dhdx, alpha = alpha, dhdt = dhdt)
+         return u
 if __name__ == '__main__':
 	portray_system()
 	system = initialize_system()
