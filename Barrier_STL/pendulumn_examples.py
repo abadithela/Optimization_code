@@ -1,7 +1,7 @@
 import numpy as np
 import time
 import math
-from basic_systems import linear_sys
+from basic_systems import linear_sys, pendulumn
 import scipy.linalg as LA
 import types
 import control as ct
@@ -68,22 +68,26 @@ def portray_system(system = initialize_system(), horizon = 500):
 # Constructing Barrier function for requirement of eventually reaching the upright position in 	T < 2 seconds.
 L = 1 # Lipschitz constant associated with this requirement
 
-def get_h(L,z):
-	pass
+def get_h(L,z,x, c):
+	h = lambda x: c**2 - L**2*(LA.norm(x - z))**2
+	return h
 
-def construct_cbf(L, z):
+def construct_cbf(L, z, x, c, dzdt):
 	'''
 	Constructing barrier function from Lipschitz constant L and signal z
 	'''
-	f = lambda x: np.identity(2) @ x
-	g = lambda x: np.array([[0,1]]).transpose()
-	cbf = get_h(L, z)
-	dhdx = lambda x: np.zeros((2,1))
-	alpha = lambda x: 2*x
-	return f,g,cbf, dhdx, alpha
+	pendulum = pendulumn(init_state = np.array([[math.pi,0]], dt = 0.01))
+	f = pendulum.f()
+	g = pendulum.g()
+	cbf = get_h(L, z, x, c)
+	dhdx = lambda x: 2*L**2 * (x - z) @ (-f + dzdt)
+	dhdt = lambda x: 2*L**2 * (x - z) @ (-g)
+	alpha = lambda x: 1*x
+	return f,g,cbf, dhdx, dhdt, alpha
 
 def get_CBF_controller(f,g,h,dhdx, alpha):
-	u = QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, h = h, dhdx = dhdx, alpha = alpha)
+	u = QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, h = h,
+		dhdx = dhdx, alpha = alpha, dhdt = dhdt)
 	return u
 
 
