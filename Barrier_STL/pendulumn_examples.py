@@ -23,6 +23,14 @@ colors = dict(mcolors.BASE_COLORS, **mcolors.CSS4_COLORS)
 plt.rcParams.update({'font.size':28})
 plt.rcParams["figure.figsize"] = (12.8,8)
 
+def robustness(system = initialize_system()):
+	'''
+	This function calculate sthe robustness of a given input signal saved in the state trajectory
+	of a system class, the default value for which is provided.
+	'''
+	norm_seq = [0.2 - np.abs(system.xhist[0,i] - math.pi/2) for i in range(system.xhist.shape[1])]
+	return max(norm_seq)
+
 def initialize_system():
 	system = linear_sys(init_state = np.array([[math.pi,0]]).transpose())
 
@@ -34,7 +42,9 @@ def initialize_system():
 	K = B.transpose() @ P
 
 	controller = lambda x: -K @ system.x
+	dzdt = lambda x: (A - B @ R.inv() @ B.transpose() @ P) @ system.x
 	system.controller = types.MethodType(controller, system)
+	system.dzdt = types.MethodType(dzdt, system)
 	return system
 
 def portray_system(system = initialize_system(), horizon = 500):
