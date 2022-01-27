@@ -4,6 +4,7 @@ import math
 import time
 import pdb
 import cvxpy as cp
+import control as ct
 
 class linear_sys():
 	def __init__(self, init_state = np.zeros((2,1)),
@@ -185,7 +186,7 @@ class nonlinear():
 				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
 			self.xhist = np.hstack((self.xhist, self.x))
 
-def QP_CBF(state, udes, f, g, h, dhdx, alpha):
+def QP_CBF(state, udes, f, g, h, dhdx, alpha, dhdt = lambda x: 0):
 	'''
 	Filters the desired control input udes, against the CBF condition specified by the CBF, h,
 	and the class-kappa function alpha.  This assumes control affine dynamics with
@@ -193,7 +194,7 @@ def QP_CBF(state, udes, f, g, h, dhdx, alpha):
 	is as follows:
 		a) f(state) is a viable function call and outputs an Nx1 vector
 		b) g(state) is a viable function call and outputs an NxM vector
-		c) (same for h and dhdx) assumes all vectors are column vectors
+		c) (same for h and dhdx and dhdt) assumes all vectors are column vectors
 		d) alpha(h(state)) is a viable function call
 		e) assumes udes is an Mx1 desired control input
 	'''
@@ -201,7 +202,7 @@ def QP_CBF(state, udes, f, g, h, dhdx, alpha):
 	m = Bmat.shape[1]
 	u = cp.Variable((m,1))
 	cost = cp.Minimize((1/2)*cp.quad_form(u,np.identity(m)) - udes.transpose() @ u)
-	constr = [dhdx(state).transpose() @ f(state) + dhdx(state).transpose() @ g(state) @ u >= -alpha(h(state))]
+	constr = [dhdx(state).transpose() @ f(state) + dhdx(state).transpose() @ g(state) @ u + dhdt(state) >= -alpha(h(state))]
 	prob = cp.Problem(cost,constr)
 	prob.solve()
 	return u.value
