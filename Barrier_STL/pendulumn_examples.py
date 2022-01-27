@@ -4,6 +4,10 @@ import math
 from basic_systems import linear_sys
 import scipy.linalg as LA
 import types
+import control as ct
+import cvxpy as cvx
+from basic_systems import QP_CBF
+
 '''
 All Matplotlib plotting basics
 '''
@@ -49,6 +53,27 @@ def portray_system(system = initialize_system(), horizon = 500):
 	ax.legend(loc = 'best')
 	plt.show()
 	pass
+
+# Constructing Barrier function for requirement of eventually reaching the upright position in 	T < 2 seconds.
+L = 1 # Lipschitz constant associated with this requirement
+
+def get_h(L,z):
+	pass
+
+def construct_cbf(L, z):
+	'''
+	Constructing barrier function from Lipschitz constant L and signal z
+	'''
+	f = lambda x: np.identity(2) @ x
+	g = lambda x: np.array([[0,1]]).transpose()
+	cbf = get_h(L, z)
+	dhdx = lambda x: np.zeros((2,1))
+	alpha = lambda x: 2*x
+	return f,g,cbf, dhdx, alpha
+
+def get_CBF_controller(f,g,h,dhdx, alpha)
+	u = QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, h = h, dhdx = dhdx, alpha = alpha)
+	return u
 
 
 if __name__ == '__main__':
