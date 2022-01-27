@@ -66,29 +66,37 @@ def portray_system(system = initialize_system(), horizon = 500):
 	pass
 
 # Constructing Barrier function for requirement of eventually reaching the upright position in 	T < 2 seconds.
-L = 1 # Lipschitz constant associated with this requirement
 
-def get_h(L,z,x, c):
+def get_h(L,z,x,c):
 	h = lambda x: c**2 - L**2*(LA.norm(x - z))**2
 	return h
 
-def construct_cbf(L, z, x, c, dzdt):
+def construct_cbf(pendulum, L, zt, c, system):
 	'''
 	Constructing barrier function from Lipschitz constant L and signal z
 	'''
-	pendulum = pendulumn(init_state = np.array([[np.pi],[0])), dt = 0.01)
+	xt = pendulum.x
 	f = pendulum.f()
 	g = pendulum.g()
-	cbf = get_h(L, z, x, c)
-	dhdx = lambda x: 2*L**2 * (x - z) @ (-f + dzdt)
-	dhdt = lambda x: 2*L**2 * (x - z) @ (-g)
-	alpha = lambda x: 1*x
+	cbf = get_h(L, zt, xt, c)
+	dhdx = lambda x: 2*L**2 * (xt - zt)
+	dzdt =
+	dhdt = lambda x: 2*L**2 * (xt - zt) @ (system.dzdt)
+	alpha = lambda x: 1*xt
 	return f,g,cbf, dhdx, dhdt, alpha
 
-def get_CBF_controller(f,g,h,dhdx, alpha):
+def get_CBF_controller(f,g,h,dhdx, dhdt, alpha):
 	u = QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, h = h, dhdx = dhdx, alpha = alpha, dhdt = dhdt)
 	return u
 
 
 if __name__ == '__main__':
 	portray_system()
+	system = initialize_system()
+	c = robustness()
+	L = 1
+	z = system.xhist
+	pendulum = pendulumn(init_state = np.array([[np.pi],[0]]), dt = 0.01)
+	for zt in
+	f,g,cbf, dhdx, dhdt, alpha = construct_cbf(pendulum, L, zt, c, system)
+	u = get_CBF_controller(f,g,cbf,dhdx, dhdt, alpha)
