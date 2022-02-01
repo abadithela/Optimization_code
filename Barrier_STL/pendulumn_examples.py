@@ -1,12 +1,15 @@
 import numpy as np
 import time
 import math
-from basic_systems import linear_sys, pendulumn
 import scipy.linalg as LA
 import types
 import control as ct
+import sys
+import pdb
+print(sys.path)
+sys.path.append('..')
 import cvxpy as cvx
-from basic_systems import QP_CBF
+from basic_systems import QP_CBF, linear_sys
 
 '''
 All Matplotlib plotting basics
@@ -22,6 +25,92 @@ rc('text', usetex=True)
 colors = dict(mcolors.BASE_COLORS, **mcolors.CSS4_COLORS)
 plt.rcParams.update({'font.size':28})
 plt.rcParams["figure.figsize"] = (12.8,8)
+
+class pendulumn():
+	def __init__(self, expert_system, c, init_state = np.zeros((2,1)), dt = 0.01):
+		self.x = init_state
+		self.xhist = init_state
+		self.uhist = None
+		self.dt = dt
+		self.pi = math.pi
+		self.gravity = -9.81
+		self.l = 1
+		self.L = 1 # Lipschitz constant
+		self.t = 0
+		self.alpha = lambda x: -1*x
+		self.expert_system = expert_system
+		self.c = c # Robustness of expert Trajectory
+
+	def controller(self):
+		'''
+		To be populated with whatever controller you would like to steer this system with
+		'''
+		u = QP_CBF(state = np.zeros((2,1)), udes = np.array([[0]]), f = self.f, g = self.g, h = self.h, dhdx = self.dhdx, alpha = self.alpha, dhdt = self.dhdt)
+		return u
+
+	def h(self):
+		time_step = int(self.t/self.dt)
+		return self.c**2 - np.linalg.norm(self.x-self.expert_system.xhist[:,time_step].reshape(-1,1))**2
+
+	'''
+	Constructing dhdx and dhdt in a similar fashion
+	'''
+	def dhdx(self):
+		time_step = int(self.t/self.dt)
+		zt = self.expert_system.xhist[:,time_step].reshape(-1,1)**2
+		dhdx = 2*self.L**2 * (self.x - zt)
+		return dhdx
+
+	def dzdt(self):
+		time_step = int(self.t/self.dt)
+		zt = self.expert_system.xhist[:,time_step].reshape(-1,1)**2
+		# pdb.set_trace()
+		dzdt = (self.expert_system.A - self.expert_system.B @ self.expert_system.B.transpose() @ self.expert_system.P)@zt
+		return dzdt
+
+	def dhdt(self):
+		time_step = int(self.t/self.dt)
+		zt = self.expert_system.xhist[:,time_step].reshape(-1,1)**2
+		dzdt = self.dzdt()
+		dhdt = 2*self.L**2 * (self.x - zt).transpose() @ (dzdt)
+		return dhdt
+
+	def f(self):
+		return np.array([[self.x[1,0], -self.gravity/self.l*np.sin(self.x[0,0])]]).transpose()
+
+	def g(self):
+		return np.array([[0,1]]).transpose()
+
+	def dynamics(self,ctrl_input):
+		'''
+		Assumes the controller method for this class is populated by a method that outputs
+		a vector of two elements for the control input (the linear and angular velocity,
+		the angular velocity should be in radians)
+		'''
+		xdot = self.f() + self.g() @ ctrl_input
+		return xdot
+
+	def reset_angle(self):
+		result = self.x[2,0] % (2*self.pi)
+		if result <= math.pi:
+			self.x[2,0] = result
+		else:
+			self.x[2,0] = result - 2*math.pi
+		pass
+
+
+	def simulate(self, steps = 20, spacing = 100):
+		self.interior_dt = self.dt/spacing
+		for tsteps in range(steps):
+			# pdb.set_trace()
+			self.t = tsteps*self.dt
+			ctrl_input = self.controller()
+			pdb.set_trace()
+			self.uhist = np.hstack((self.uhist, ctrl_input)) if self.uhist is not None else ctrl_input
+			for splices in range(spacing):
+				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
+			self.reset_angle()
+			self.xhist = np.hstack((self.xhist, self.x))
 
 def initialize_system():
 	system = linear_sys(init_state = np.array([[math.pi,0]]).transpose())
@@ -69,26 +158,15 @@ def portray_system(system = initialize_system(), horizon = 500):
 	pass
 
 # Constructing Barrier function for requirement of eventually reaching the upright position in 	T < 2 seconds.
+'''
+Construct the corresponding barrier function.
+	Note: Convert the time to a time-step so that the appropriate indexed
+	state can be identified in expert_system.xhist
+'''
+# This returns the value of h at time t:
 
-def get_h(L,z,x,c,t, dt):
-	h = lambda x: c**2 - L**2*(LA.norm(x - z))**2
-	return h
 
-def construct_cbf(pendulum, L, c, system):
-	'''
-	Constructing barrier function from Lipschitz constant L and signal z
-	'''
-	xt = lambda pendulum: pendulum.x
-	f = lambda pendulum: pendulum.f()
-	g = lambda pendulum: pendulum.g()
-	cbf = lambda xt, zt: get_h(L, zt, xt, c)
-	dhdx = lambda xt, zt: 2*L**2 * (xt - zt)
-	dzdt = lambda zt: (system.A - system.B @ system.P)@zt
-	dhdt = lambda xt, zt: 2*L**2 * (xt - zt) @ (dzdt)
-	alpha = lambda xt: 1*xt
-	return f,g,cbf, dhdx, dhdt, alpha
-
-def get_CBF_controller(f,g,h,dhdx, alpha):
+def get_CBF_controller(f,g,h,dhdx, dhdt, alpha):
 	u = QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, h = h,
 		dhdx = dhdx, alpha = alpha, dhdt = dhdt)
 	return u
@@ -111,31 +189,14 @@ def true_system_simulation():
 	expert_system.simulate(steps = 500)
 	c = robustness(system = expert_system)
 
-	'''
-	Construct the corresponding barrier function.
-		Note: Convert the time to a time-step so that the appropriate indexed
-		state can be identified in expert_system.xhist
-	'''
-	def h(x,t,c,expert_system):
-		time_step = t/dt
-		return c**2 - np.linalg.norm(x-expert_system.xhist[:,time_step].reshape(-1,1))**2
-
-	'''
-	Construct dhdx in a similar fashion
-	'''
-	pass
 
 
 if __name__ == '__main__':
-	portray_system()
-	system = initialize_system()
+	# portray_system()
+	expert_system = initialize_system() # Linear system
 	c = robustness()
 	L = 1
-	z = system.xhist
-	pendulum = pendulumn(init_state = np.array([[np.pi],[0]]), dt = 0.01)
-	f,g,cbf, dhdx, dhdt, alpha = construct_cbf(pendulum, L, c, system)
+	z = expert_system.xhist
+	pendulum = pendulumn(expert_system, c, init_state = np.array([[np.pi],[0]]), dt = 0.01) # True system
 
-	for t in range(len(z[0])):
-		zt = z[:,t]
-		xt = pendulum.simulate(step=1)
-		u = get_CBF_controller(f,g,cbf,dhdx, dhdt, alpha)
+	pendulum.simulate(steps=10)
