@@ -188,7 +188,7 @@ class nonlinear():
 				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
 			self.xhist = np.hstack((self.xhist, self.x))
 
-def QP_CBF(state, udes, f, g, h, dhdx, alpha, dhdt = lambda x: 0):
+def QP_CBF(state, udes, f, g, hval, dhdx, alpha, dhdt = lambda x: 0):
 	'''
 	Filters the desired control input udes, against the CBF condition specified by the CBF, h,
 	and the class-kappa function alpha.  This assumes control affine dynamics with
@@ -202,13 +202,14 @@ def QP_CBF(state, udes, f, g, h, dhdx, alpha, dhdt = lambda x: 0):
 	'''
 	Bmat = g()
 	m = Bmat.shape[1]
-	u = cp.Variable((m,1))
-	cost = cp.Minimize((1/2)*cp.quad_form(u,np.identity(m)) - udes.transpose() @ u)
-	constr = [dhdx().transpose() @ f() + dhdx().transpose() @ g() @ u + dhdt() >= -alpha(h())]
+	ctrl_input = cp.Variable((m,1))
+	cost = cp.Minimize((1/2)*cp.quad_form(ctrl_input,np.identity(m)) - udes.transpose() @  ctrl_input)
+	constr = [dhdx().transpose() @ f() + dhdx().transpose() @ g() @ ctrl_input + dhdt() >= -alpha(hval())]
 	prob = cp.Problem(cost,constr)
-	pdb.set_trace()
 	prob.solve()
-	return u.value
+	# pdb.set_trace()
+
+	return ctrl_input.value
 
 class cart_pendulum():
 	def __init__(self, init_state = np.zeros((4,1)), dt = 0.01, params = [2,1,0.2,9.81]):

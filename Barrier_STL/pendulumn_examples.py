@@ -37,7 +37,7 @@ class pendulumn():
 		self.l = 1
 		self.L = 1 # Lipschitz constant
 		self.t = 0
-		self.alpha = lambda x: -1*x
+		self.alpha = lambda x: 1*x
 		self.expert_system = expert_system
 		self.c = c # Robustness of expert Trajectory
 
@@ -45,32 +45,32 @@ class pendulumn():
 		'''
 		To be populated with whatever controller you would like to steer this system with
 		'''
-		u = QP_CBF(state = np.zeros((2,1)), udes = np.array([[0]]), f = self.f, g = self.g, h = self.h, dhdx = self.dhdx, alpha = self.alpha, dhdt = self.dhdt)
+		u = QP_CBF(state = np.zeros((2,1)), udes = np.array([[0]]), f = self.f, g = self.g, hval = self.h, dhdx = self.dhdx, alpha = self.alpha, dhdt = self.dhdt)
 		return u
 
 	def h(self):
 		time_step = int(self.t/self.dt)
-		return self.c**2 - np.linalg.norm(self.x-self.expert_system.xhist[:,time_step].reshape(-1,1))**2
+		return self.c**2 - self.L**2 * np.linalg.norm(self.x-self.expert_system.xhist[:,time_step].reshape(-1,1))**2
 
 	'''
 	Constructing dhdx and dhdt in a similar fashion
 	'''
 	def dhdx(self):
 		time_step = int(self.t/self.dt)
-		zt = self.expert_system.xhist[:,time_step].reshape(-1,1)**2
-		dhdx = 2*self.L**2 * (self.x - zt)
+		zt = self.expert_system.xhist[:,time_step].reshape(-1,1)
+		dhdx = -2*self.L**2 * (self.x - zt)
 		return dhdx
 
 	def dzdt(self):
 		time_step = int(self.t/self.dt)
-		zt = self.expert_system.xhist[:,time_step].reshape(-1,1)**2
+		zt = self.expert_system.xhist[:,time_step].reshape(-1,1)
 		# pdb.set_trace()
 		dzdt = (self.expert_system.A - self.expert_system.B @ self.expert_system.B.transpose() @ self.expert_system.P)@zt
 		return dzdt
 
 	def dhdt(self):
 		time_step = int(self.t/self.dt)
-		zt = self.expert_system.xhist[:,time_step].reshape(-1,1)**2
+		zt = self.expert_system.xhist[:,time_step].reshape(-1,1)
 		dzdt = self.dzdt()
 		dhdt = 2*self.L**2 * (self.x - zt).transpose() @ (dzdt)
 		return dhdt
@@ -91,11 +91,11 @@ class pendulumn():
 		return xdot
 
 	def reset_angle(self):
-		result = self.x[2,0] % (2*self.pi)
+		result = self.x[0,0] % (2*self.pi)
 		if result <= math.pi:
-			self.x[2,0] = result
+			self.x[0,0] = result
 		else:
-			self.x[2,0] = result - 2*math.pi
+			self.x[0,0] = result - 2*math.pi
 		pass
 
 
@@ -105,12 +105,17 @@ class pendulumn():
 			# pdb.set_trace()
 			self.t = tsteps*self.dt
 			ctrl_input = self.controller()
-			pdb.set_trace()
+			# pdb.set_trace()
 			self.uhist = np.hstack((self.uhist, ctrl_input)) if self.uhist is not None else ctrl_input
 			for splices in range(spacing):
 				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
 			self.reset_angle()
 			self.xhist = np.hstack((self.xhist, self.x))
+
+	def portray_values(self):
+		fig, ax = plt.subplots()
+		times = [i*self.dt for i in range(self.xhist.shape[1])]
+		ax.plot(times, self.xhist[0,:], lw = 3, color = colors['blue'], label = r'$\theta$')
 
 def initialize_system():
 	system = linear_sys(init_state = np.array([[math.pi,0]]).transpose())
@@ -142,11 +147,12 @@ def portray_system(system = initialize_system(), horizon = 500):
 	This function should portray the state history of a given example pendulumn system
 	for a time period over which it's simulated (provided as an input to this function )
 	'''
-	system.simulate(steps = horizon)
+	# system.simulate(steps = horizon)
 	fig, ax = plt.subplots()
-	times = [i*system.dt for i in range(horizon+1)]
+	times = [i*system.dt for i in range(system.xhist.shape[1])]
 	ax.plot(times, system.xhist[0,:], lw = 3, color = colors['blue'], label = r'$\theta$')
 	ax.plot(times, system.xhist[1,:], lw = 3, color = colors['gold'], label = r'$\dot \theta$')
+	ax.hlines(math.pi/2, times[0], times[-1], color = colors['black'], label = r'$\mathrm{desired}$')
 	ax.set_xlabel(r'$\mathrm{time}$')
 	ax.set_title(r'$\mathrm{Example~Trajectory}$')
 	ax.grid(lw = 3, alpha = 0.5)
@@ -167,7 +173,7 @@ Construct the corresponding barrier function.
 
 
 def get_CBF_controller(f,g,h,dhdx, dhdt, alpha):
-	u = QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, h = h,
+	u = QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, hval = h,
 		dhdx = dhdx, alpha = alpha, dhdt = dhdt)
 	return u
 
@@ -190,13 +196,15 @@ def true_system_simulation():
 	c = robustness(system = expert_system)
 
 
-
 if __name__ == '__main__':
 	# portray_system()
 	expert_system = initialize_system() # Linear system
+	expert_system.simulate(steps = 200)
+	# portray_system(system=expert_system)
 	c = robustness()
 	L = 1
 	z = expert_system.xhist
 	pendulum = pendulumn(expert_system, c, init_state = np.array([[np.pi],[0]]), dt = 0.01) # True system
 
-	pendulum.simulate(steps=10)
+	pendulum.simulate(steps=200)
+	portray_system(system=pendulum)
