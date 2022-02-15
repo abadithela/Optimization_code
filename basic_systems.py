@@ -24,7 +24,7 @@ class linear_sys():
 	def controller(self):
 		'''
 		This can be whatever function, it just has to produce an input vector of appropriate size (Mx1)
-		the specific function 
+		the specific function
 		'''
 		pass
 
@@ -37,6 +37,13 @@ class linear_sys():
 			self.xhist = np.hstack((self.xhist, self.x))
 			self.uhist.append(self.controller())
 		pass
+
+	def reset(self, init_state = np.zeros((2,1))):
+		self.x = init_state
+		self.xhist = init_state
+		self.uhist = []
+		pass
+
 
 class unicycle():
 	def __init__(self, init_state = np.zeros((3,1)), dt = 0.01):
@@ -62,7 +69,7 @@ class unicycle():
 		V = 1/2*error.transpose() @ self.P @ error
 		if V <= c:
 			return np.zeros((2,1))
-		else:	
+		else:
 			LgV = error.transpose() @ self.P @ self.g()
 			return np.linalg.pinv(LgV)*(-alpha*V)
 
@@ -108,7 +115,7 @@ class pendulumn():
 		self.uhist = None
 		self.dt = dt
 		self.pi = math.pi
-		self.g = -9.81
+		self.gravity = -9.81
 		self.l = 1
 
 	def controller(self):
@@ -118,7 +125,7 @@ class pendulumn():
 		pass
 
 	def f(self):
-		return np.array([[self.x[1,0], -self.g/self.l*np.sin(self.x[0,0])]]).transpose()
+		return np.array([[self.x[1,0], -self.gravity/self.l*np.sin(self.x[0,0])]]).transpose()
 
 	def g(self):
 		return np.array([[0,1]]).transpose()
@@ -144,13 +151,15 @@ class pendulumn():
 	def simulate(self, steps = 20, spacing = 100):
 		self.interior_dt = self.dt/spacing
 		for tsteps in range(steps):
+			# pdb.set_trace()
 			ctrl_input = self.controller()
+			pdb.set_trace()
 			self.uhist = np.hstack((self.uhist, ctrl_input)) if self.uhist is not None else ctrl_input
 			for splices in range(spacing):
 				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
 			self.reset_angle()
 			self.xhist = np.hstack((self.xhist, self.x))
-		
+
 
 class nonlinear():
 	def __init__(self, init_state = np.zeros((3,1)), dt = 0.01):
@@ -186,7 +195,7 @@ class nonlinear():
 				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
 			self.xhist = np.hstack((self.xhist, self.x))
 
-def QP_CBF(state, udes, f, g, h, dhdx, alpha, dhdt = lambda x: 0):
+def QP_CBF(state, udes, f, g, hval, dhdx, alpha, dhdt = lambda x: 0):
 	'''
 	Filters the desired control input udes, against the CBF condition specified by the CBF, h,
 	and the class-kappa function alpha.  This assumes control affine dynamics with
@@ -198,14 +207,16 @@ def QP_CBF(state, udes, f, g, h, dhdx, alpha, dhdt = lambda x: 0):
 		d) alpha(h(state)) is a viable function call
 		e) assumes udes is an Mx1 desired control input
 	'''
-	Bmat = g(state)
+	Bmat = g()
 	m = Bmat.shape[1]
-	u = cp.Variable((m,1))
-	cost = cp.Minimize((1/2)*cp.quad_form(u,np.identity(m)) - udes.transpose() @ u)
-	constr = [dhdx(state).transpose() @ f(state) + dhdx(state).transpose() @ g(state) @ u + dhdt(state) >= -alpha(h(state))]
+	ctrl_input = cp.Variable((m,1))
+	cost = cp.Minimize((1/2)*cp.quad_form(ctrl_input,np.identity(m)) - udes.transpose() @  ctrl_input)
+	constr = [dhdx().transpose() @ f() + dhdx().transpose() @ g() @ ctrl_input + dhdt() >= -alpha(hval())]
 	prob = cp.Problem(cost,constr)
 	prob.solve()
-	return u.value
+	# pdb.set_trace()
+
+	return ctrl_input.value
 
 class cart_pendulum():
 	def __init__(self, init_state = np.zeros((4,1)), dt = 0.01, params = [2,1,0.2,9.81]):
@@ -239,7 +250,7 @@ class cart_pendulum():
 		vec[1,0] = (self.m*(-self.x[3,0]**2*self.l + self.g*math.cos(self.x[2,0]))*math.sin(self.x[2,0]))/(
 			self.M + self.m*math.sin(self.x[2,0])**2)
 		vec[2,0] = self.x[3,0]
-		vec[3,0] = (self.g*(self.m + self.M)*math.sin(self.x[2,0]) - 
+		vec[3,0] = (self.g*(self.m + self.M)*math.sin(self.x[2,0]) -
 			self.x[3,0]**2*self.l*self.m*math.sin(self.x[2,0])*math.cos(self.x[2,0]))/(self.l*(self.M + self.m*math.sin(self.x[2,0])**2))
 		return vec
 
@@ -259,7 +270,7 @@ class cart_pendulum():
 			disturbance = base_vec/np.linalg.norm(base_vec)*disturbance_bound
 			xdot = self.f() + self.g_dyn() @ ctrl_input + disturbance
 		return xdot
-	
+
 	def get_linear_A(self):
 		self.A = np.array([
 			[0, 1, 0, 0],
@@ -327,7 +338,7 @@ class discrete_grid:
 
 	def simulate(self, steps = 50):
 		for i in range(steps): self.update()
-		pass 
+		pass
 
 
 
@@ -338,6 +349,3 @@ if __name__ == '__main__':
 	dhdx = lambda x: np.zeros((2,1))
 	alpha = lambda x: 2*x
 	print(QP_CBF(state = np.zeros((2,1)), udes = 0, f = f, g = g, h = cbf, dhdx = dhdx, alpha = alpha))
-
-
-
