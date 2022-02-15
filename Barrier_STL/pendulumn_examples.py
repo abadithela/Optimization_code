@@ -35,9 +35,10 @@ class pendulumn():
 		self.pi = math.pi
 		self.gravity = -9.81
 		self.l = 1
+		self.hhist = []
 		self.L = 1 # Lipschitz constant
 		self.t = 0
-		self.alpha = lambda x: 1*x
+		self.alpha = lambda x: 0.5*x
 		self.expert_system = expert_system
 		self.c = c # Robustness of expert Trajectory
 
@@ -111,11 +112,12 @@ class pendulumn():
 				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
 			self.reset_angle()
 			self.xhist = np.hstack((self.xhist, self.x))
+			self.hhist.append(self.h())
 
 	def portray_values(self):
 		fig, ax = plt.subplots()
 		times = [i*self.dt for i in range(self.xhist.shape[1])]
-		ax.plot(times, self.xhist[0,:], lw = 3, color = colors['blue'], label = r'$\theta$')
+		ax.plot(times, self.hhist, lw = 3, color = colors['blue'], label = r'$h$')
 
 def initialize_system():
 	system = linear_sys(init_state = np.array([[math.pi,0]]).transpose())
@@ -139,7 +141,7 @@ def robustness(system = initialize_system()):
 	This function calculate sthe robustness of a given input signal saved in the state trajectory
 	of a system class, the default value for which is provided.
 	'''
-	norm_seq = [0.2 - np.abs(system.xhist[0,i] - math.pi/2) for i in range(system.xhist.shape[1])]
+	norm_seq = [0.2 - np.abs(system.xhist[0,i]) for i in range(system.xhist.shape[1])]
 	return max(norm_seq)
 
 def portray_system(system = initialize_system(), horizon = 500):
@@ -200,11 +202,14 @@ if __name__ == '__main__':
 	# portray_system()
 	expert_system = initialize_system() # Linear system
 	expert_system.simulate(steps = 200)
-	# portray_system(system=expert_system)
-	c = robustness()
+	# By naive implementation of an expert trajectory, we don't get a good expert trajectory
+	#portray_system(system=expert_system)
+	c = robustness(system = expert_system)
+	# pdb.set_trace()
 	L = 1
 	z = expert_system.xhist
 	pendulum = pendulumn(expert_system, c, init_state = np.array([[np.pi],[0]]), dt = 0.01) # True system
 
 	pendulum.simulate(steps=200)
 	portray_system(system=pendulum)
+	pendulum.portray_values()

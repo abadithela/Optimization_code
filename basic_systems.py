@@ -38,6 +38,13 @@ class linear_sys():
 			self.uhist.append(self.controller())
 		pass
 
+	def reset(self, init_state = np.zeros((2,1))):
+		self.x = init_state
+		self.xhist = init_state
+		self.uhist = []
+		pass
+
+
 class unicycle():
 	def __init__(self, init_state = np.zeros((3,1)), dt = 0.01):
 		self.x = init_state
