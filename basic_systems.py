@@ -4,7 +4,6 @@ import math
 import time
 import pdb
 import cvxpy as cp
-import control as ct
 
 class linear_sys():
 	def __init__(self, init_state = np.zeros((2,1)),
