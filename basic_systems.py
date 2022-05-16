@@ -97,13 +97,20 @@ class unicycle():
 		pass
 
 
-	def simulate(self, steps = 20, spacing = 100):
+	def simulate(self, steps = 20, spacing = 100, noise_bound = None):
 		self.interior_dt = self.dt/spacing
 		for tsteps in range(steps):
 			ctrl_input = self.controller()
 			self.uhist = np.hstack((self.uhist, ctrl_input)) if self.uhist is not None else ctrl_input
-			for splices in range(spacing):
-				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
+			if noise_bound is None:
+				for splices in range(spacing):
+					self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
+			else:
+				for splices in range(spacing):
+					direction = np.random.normal(size = (3,1))
+					unit_direction = direction/np.linalg.norm(direction)
+					disturbance = noise_bound*np.random.uniform(0,1)**(1/3)*unit_direction
+					self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt + disturbance*self.interior_dt
 			self.reset_angle()
 			self.xhist = np.hstack((self.xhist, self.x))
 
