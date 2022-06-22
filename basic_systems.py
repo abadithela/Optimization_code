@@ -97,10 +97,13 @@ class unicycle():
 		pass
 
 
-	def simulate(self, steps = 20, spacing = 100, noise_bound = None):
+	def simulate(self, steps = 20, spacing = 100, noise_bound = None, prior_input = None):
 		self.interior_dt = self.dt/spacing
 		for tsteps in range(steps):
-			ctrl_input = self.controller()
+			if prior_input is None:
+				ctrl_input = self.controller()
+			else:
+				ctrl_input = prior_input
 			self.uhist = np.hstack((self.uhist, ctrl_input)) if self.uhist is not None else ctrl_input
 			if noise_bound is None:
 				for splices in range(spacing):
