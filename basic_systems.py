@@ -43,7 +43,6 @@ class linear_sys():
 		self.uhist = []
 		pass
 
-
 class unicycle():
 	def __init__(self, init_state = np.zeros((3,1)), dt = 0.01):
 		self.x = init_state
@@ -110,11 +109,12 @@ class unicycle():
 					self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
 			else:
 				for splices in range(spacing):
-					direction = np.random.normal(size = (3,1))
-					unit_direction = direction/np.linalg.norm(direction)
-					disturbance = noise_bound*np.random.uniform(0,1)**(1/3)*unit_direction
+					# direction = np.random.normal(size = (3,1))
+					# unit_direction = direction/np.linalg.norm(direction)
+					# disturbance = noise_bound*np.random.uniform(0,1)**(1/3)*unit_direction
+					disturbance = np.random.normal(loc = noise_bound, size = (3,1))
 					self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt + disturbance*self.interior_dt
-			self.reset_angle()
+			# self.reset_angle()
 			self.xhist = np.hstack((self.xhist, self.x))
 		pass
 
@@ -174,7 +174,6 @@ class pendulumn():
 				self.x = self.x + self.dynamics(ctrl_input = ctrl_input)*self.interior_dt
 			self.reset_angle()
 			self.xhist = np.hstack((self.xhist, self.x))
-
 
 class nonlinear():
 	def __init__(self, init_state = np.zeros((3,1)), dt = 0.01):
@@ -323,7 +322,6 @@ class cart_pendulum():
 				self.xhist = np.hstack((self.xhist, self.x))
 				cstep += 1
 		pass
-
 
 class discrete_grid:
 	def __init__(self, graph_size = [5,5], init_state = [2,2]):
